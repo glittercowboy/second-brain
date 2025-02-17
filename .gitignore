@@ -1,4 +1,18 @@
-.env
-*.log
+# Ignore configuration files with sensitive information
+config.ini
+
+# Python-related ignores
 __pycache__/
-.DS_Store
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+venv311/
+.env
+
+# Database files
+*.db
+
+# Logs
+*.log
