@@ -1,15 +1,19 @@
 # bot.py
 """
-Phase 4: Telegram Bot + Whisper Transcription + SQLite
-------------------------------------------------------
-This script connects to the Telegram Bot API, listens for voice messages,
-saves them locally, transcribes them using Whisper, and stores the
-transcriptions in an SQLite database.
+Phase 5 (Modified): Telegram Bot + Whisper + SQLite + Multi-Category
+-------------------------------------------------------------------
+- Uses OPENAI_API_KEY from environment variable
+- Allows multiple categories (health, work, purpose, relationships)
+- Stores categories as a comma-separated string in SQLite
+- Still deletes local .ogg file after processing
 """
 
 import os
 import logging
-import configparser
+import json
+
+import configparser  # only if you still use config for other stuff; otherwise remove
+from datetime import datetime
 
 # Telegram imports
 from telegram import Update
@@ -18,8 +22,11 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, Callb
 # Whisper import
 import whisper
 
-# Database imports (our new file)
-from database import initialize_db, insert_transcription
+# Database imports
+from database import initialize_db, insert_transcription_with_ai
+
+# OpenAI
+import openai
 
 # -------------------------------------------------------------------
 # 1) LOGGING CONFIG
@@ -33,128 +40,168 @@ logging.basicConfig(
 # 2) TRANSCRIBE AUDIO FUNCTION
 # -------------------------------------------------------------------
 def transcribe_audio(file_path: str) -> str:
-    """
-    Uses Whisper to transcribe the given audio file.
-    Returns the transcribed text or None if an error occurs.
-    """
     try:
-        # Load the Whisper model (tiny, base, small, medium, large)
         model = whisper.load_model("base")
-        
-        # Transcribe the audio
         result = model.transcribe(file_path)
-        
-        # Extract the text from the result dictionary
-        transcribed_text = result["text"]
-        
-        # Return the cleaned-up text
-        return transcribed_text.strip()
+        return result["text"].strip()
     except Exception as e:
         logging.error(f"Error transcribing audio: {e}")
         return None
 
 # -------------------------------------------------------------------
-# 3) COMMAND HANDLER: /start
+# 3) AI CATEGORIZE & EXTRACT (MULTIPLE CATEGORIES)
+# -------------------------------------------------------------------
+def categorize_and_extract(text: str) -> (str, str):
+    """
+    Sends 'text' to OpenAI to:
+      1) Possibly assign multiple categories from: health, work, purpose, relationships
+      2) Extract keywords
+    Returns (comma-separated categories, comma-separated keywords).
+    """
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {
+                    "role": "system", 
+                    "content": "You are a helpful assistant that categorizes text and extracts keywords."
+                },
+                {
+                    "role": "user", 
+                    "content": f"""
+                    Analyze this text:
+                    \"\"\"{text}\"\"\"
+
+                    1) Categorize it into any subset of [health, work, purpose, relationships].
+                       For example, if it touches on both work and health, list both.
+                    2) Extract a few relevant keywords.
+
+                    Respond ONLY with a valid JSON in this format:
+                    {{
+                      "categories": ["...","..."],
+                      "keywords": ["...","..."]
+                    }}
+                    """
+                }
+            ],
+            temperature=0.3,
+            max_tokens=150
+        )
+
+        # Extract the response text
+        raw_text = response.choices[0].message.content.strip()
+        data = json.loads(raw_text)
+
+        # Convert arrays to comma-separated strings
+        cat_list = data.get("categories", [])
+        categories_str = ", ".join([c.strip().lower() for c in cat_list])
+
+        kw_list = data.get("keywords", [])
+        keywords_str = ", ".join([k.strip().lower() for k in kw_list])
+
+        return (categories_str, keywords_str)
+    except Exception as e:
+        logging.error(f"Error in categorize_and_extract: {e}")
+        return ("", "")
+
+# -------------------------------------------------------------------
+# 4) COMMAND HANDLER: /start
 # -------------------------------------------------------------------
 def start(update: Update, context: CallbackContext) -> None:
     welcome_message = (
         "Hello, I'm your AI Journaling Bot!\n"
-        "Send me a voice note and I'll transcribe it for you."
+        "Send me a voice note and I'll transcribe it with multiple possible categories."
     )
     update.message.reply_text(welcome_message)
 
 # -------------------------------------------------------------------
-# 4) VOICE MESSAGE HANDLER
+# 5) VOICE HANDLER
 # -------------------------------------------------------------------
 def voice_handler(update: Update, context: CallbackContext) -> None:
     """
-    Handler for voice messages.
-    Downloads the voice file, saves it locally, transcribes it,
-    inserts the transcription into the SQLite database,
-    and then deletes the local file.
+    - Downloads the voice file
+    - Transcribes with Whisper
+    - Calls categorize_and_extract for multi-categories + keywords
+    - Inserts into SQLite
+    - Deletes local file
     """
     try:
-        # 1) Download the voice note
+        # Download
         voice_file = update.message.voice.get_file()
-        
-        # Construct a unique filename based on user ID and message ID
         file_path = f"voice_{update.message.from_user.id}_{update.message.message_id}.ogg"
-        
         voice_file.download(file_path)
         logging.info(f"Voice note saved locally as: {file_path}")
 
-        # 2) Transcribe the audio
+        # Transcribe
         transcribed_text = transcribe_audio(file_path)
-        
         if transcribed_text:
-            # 3) Reply with the transcribed text
+            # Categorize & Extract
+            categories_str, keywords_str = categorize_and_extract(transcribed_text)
+
+            # Reply
             response = (
-                "Voice note received and saved locally!\n\n"
-                f"**Transcription**:\n{transcribed_text}"
+                "Voice note received!\n\n"
+                f"**Transcription**:\n{transcribed_text}\n\n"
+                f"**Categories**: {categories_str}\n"
+                f"**Keywords**: {keywords_str}"
             )
             update.message.reply_text(response)
-            logging.info(f"Transcription: {transcribed_text}")
-            
-            # 4) Insert into database
-            insert_transcription(
+
+            # Insert into DB
+            insert_transcription_with_ai(
                 user_id=str(update.message.from_user.id),
                 message_id=str(update.message.message_id),
                 transcription=transcribed_text,
-                file_path=file_path
+                file_path=file_path,
+                categories=categories_str,
+                keywords=keywords_str
             )
         else:
             update.message.reply_text("Voice note saved, but I couldn't transcribe it.")
 
-        # 5) Delete the local file after transcription attempt
-        import os
+        # Delete file
         try:
             os.remove(file_path)
             logging.info(f"Deleted local file: {file_path}")
         except Exception as e:
             logging.error(f"Could not delete file: {file_path} - {e}")
-            
+
     except Exception as e:
         logging.error(f"Error handling voice note: {e}")
         update.message.reply_text("Sorry, I couldn't process that voice note.")
+
 # -------------------------------------------------------------------
-# 5) MAIN FUNCTION
+# 6) MAIN
 # -------------------------------------------------------------------
 def main():
-    """
-    Main function to start the bot.
-    Reads the token from config.ini, initializes the database,
-    and starts polling for messages.
-    """
-    # 5.1) Read bot token from config.ini
+    # If you still need config.ini for Telegram token, keep this block;
+    # otherwise you can remove config usage entirely.
     config = configparser.ConfigParser()
     config.read("config.ini")
     BOT_TOKEN = config["telegram"]["BOT_TOKEN"]
+    OPENAI_API_KEY = config["openai"]["OPENAI_API_KEY"]
+
+    # Set the OpenAI API key
+    openai.api_key = OPENAI_API_KEY
 
     if not BOT_TOKEN:
         raise ValueError("Error: BOT_TOKEN not found in config.ini.")
+    if not OPENAI_API_KEY:
+        raise ValueError("Error: OPENAI_API_KEY not found in config.ini.")
 
-    # 5.2) Initialize the SQLite database
+    # Init DB
     initialize_db()
 
-    # 5.3) Create the Updater and pass in the bot token
+    # Start bot
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
 
-    # 5.4) Register command handlers
     dp.add_handler(CommandHandler("start", start))
-
-    # 5.5) Register the voice message handler
     dp.add_handler(MessageHandler(Filters.voice, voice_handler))
 
-    # 5.6) Start polling for updates
     updater.start_polling()
     logging.info("Bot is running... Press Ctrl+C to stop.")
-
-    # 5.7) Run until you press Ctrl+C
     updater.idle()
 
-# -------------------------------------------------------------------
-# 6) ENTRY POINT
-# -------------------------------------------------------------------
 if __name__ == "__main__":
     main()
