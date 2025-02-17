@@ -1,18 +1,19 @@
 # bot.py
 """
-Phase 5 (Modified): Telegram Bot + Whisper + SQLite + Multi-Category
--------------------------------------------------------------------
-- Uses OPENAI_API_KEY from environment variable
-- Allows multiple categories (health, work, purpose, relationships)
-- Stores categories as a comma-separated string in SQLite
-- Still deletes local .ogg file after processing
+Phase 5 (Modified for GPT-4 + Extended Prompts + Larger Max Tokens):
+--------------------------------------------------------------------
+- Uses GPT-4 via ChatCompletion
+- Larger max_tokens (1000)
+- Multi-category classification (Work, Health, Relationships, Purpose)
+- More specific instructions for categorization and keyword extraction
+- Outputs in JSON only
+- Deletes local .ogg file after processing
 """
 
 import os
 import logging
 import json
-
-import configparser  # only if you still use config for other stuff; otherwise remove
+import configparser
 from datetime import datetime
 
 # Telegram imports
@@ -40,6 +41,10 @@ logging.basicConfig(
 # 2) TRANSCRIBE AUDIO FUNCTION
 # -------------------------------------------------------------------
 def transcribe_audio(file_path: str) -> str:
+    """
+    Transcribes the given audio file using Whisper.
+    Returns the transcribed text, or None if there's an error.
+    """
     try:
         model = whisper.load_model("base")
         result = model.transcribe(file_path)
@@ -49,55 +54,77 @@ def transcribe_audio(file_path: str) -> str:
         return None
 
 # -------------------------------------------------------------------
-# 3) AI CATEGORIZE & EXTRACT (MULTIPLE CATEGORIES)
+# 3) AI CATEGORIZE & EXTRACT (MULTIPLE CATEGORIES) WITH GPT-4
 # -------------------------------------------------------------------
 def categorize_and_extract(text: str) -> (str, str):
     """
-    Sends 'text' to OpenAI to:
-      1) Possibly assign multiple categories from: health, work, purpose, relationships
-      2) Extract keywords
+    Sends 'text' to GPT-4 to:
+      1) Possibly assign multiple categories from: Work, Health, Relationships, Purpose
+      2) Extract the most relevant keywords
     Returns (comma-separated categories, comma-separated keywords).
     """
     try:
+        # The prompt merges your categorization & keyword instructions into one.
+        # We request JSON only, to parse easily.
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a classifier that categorizes diary entries into four possible buckets: "
+                    "Work, Health, Relationships, and Purpose. Then you also extract the most relevant keywords. "
+                    "Return your answer in valid JSON ONLY, with the format:\n\n"
+                    "{\n"
+                    '  "categories": ["Work", "Health"],\n'
+                    '  "keywords": ["Keyword1", "Keyword2"]\n'
+                    "}\n\n"
+                    "No extra text or punctuation beyond valid JSON."
+                )
+            },
+            {
+                "role": "user",
+                "content": f"""
+Text:
+\"\"\"{text}\"\"\"
+
+Categorization Instructions:
+- You can output any subset of [Work, Health, Relationships, Purpose].
+- If multiple categories apply, list them all, exactly matching those category names.
+- Do not explain your reasoning or add extra text.
+
+Keyword Extraction Instructions:
+- Extract the most relevant keywords from this personal journal entry.
+- Focus on meaningful themes, emotions, and concepts.
+- Avoid generic or filler words.
+- Output them capitalized, separated by commas in JSON array form.
+
+Return JSON ONLY, e.g.:
+{{
+  "categories": ["Work", "Health"],
+  "keywords": ["Stress", "Deadlines", "Project"]
+}}
+                """
+            }
+        ]
+
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system", 
-                    "content": "You are a helpful assistant that categorizes text and extracts keywords."
-                },
-                {
-                    "role": "user", 
-                    "content": f"""
-                    Analyze this text:
-                    \"\"\"{text}\"\"\"
-
-                    1) Categorize it into any subset of [health, work, purpose, relationships].
-                       For example, if it touches on both work and health, list both.
-                    2) Extract a few relevant keywords.
-
-                    Respond ONLY with a valid JSON in this format:
-                    {{
-                      "categories": ["...","..."],
-                      "keywords": ["...","..."]
-                    }}
-                    """
-                }
-            ],
+            model="gpt-4",            # Use GPT-4
+            messages=messages,
             temperature=0.3,
-            max_tokens=150
+            max_tokens=1000          # Increased token limit
         )
 
         # Extract the response text
         raw_text = response.choices[0].message.content.strip()
+
+        # Parse JSON
         data = json.loads(raw_text)
 
         # Convert arrays to comma-separated strings
         cat_list = data.get("categories", [])
-        categories_str = ", ".join([c.strip().lower() for c in cat_list])
+        categories_str = ", ".join([c.strip() for c in cat_list])
 
         kw_list = data.get("keywords", [])
-        keywords_str = ", ".join([k.strip().lower() for k in kw_list])
+        keywords_str = ", ".join([k.strip() for k in kw_list])
 
         return (categories_str, keywords_str)
     except Exception as e:
@@ -110,7 +137,7 @@ def categorize_and_extract(text: str) -> (str, str):
 def start(update: Update, context: CallbackContext) -> None:
     welcome_message = (
         "Hello, I'm your AI Journaling Bot!\n"
-        "Send me a voice note and I'll transcribe it with multiple possible categories."
+        "Send me a voice note and I'll transcribe it, categorize it, and extract keywords using ``GPT-4``."
     )
     update.message.reply_text(welcome_message)
 
@@ -121,24 +148,24 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
     """
     - Downloads the voice file
     - Transcribes with Whisper
-    - Calls categorize_and_extract for multi-categories + keywords
+    - Calls categorize_and_extract for multi-categories + keywords (GPT-4)
     - Inserts into SQLite
     - Deletes local file
     """
     try:
-        # Download
+        # 5.1) Download
         voice_file = update.message.voice.get_file()
         file_path = f"voice_{update.message.from_user.id}_{update.message.message_id}.ogg"
         voice_file.download(file_path)
         logging.info(f"Voice note saved locally as: {file_path}")
 
-        # Transcribe
+        # 5.2) Transcribe
         transcribed_text = transcribe_audio(file_path)
         if transcribed_text:
-            # Categorize & Extract
+            # 5.3) Categorize & Extract
             categories_str, keywords_str = categorize_and_extract(transcribed_text)
 
-            # Reply
+            # 5.4) Reply
             response = (
                 "Voice note received!\n\n"
                 f"**Transcription**:\n{transcribed_text}\n\n"
@@ -147,7 +174,7 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
             )
             update.message.reply_text(response)
 
-            # Insert into DB
+            # 5.5) Insert into DB
             insert_transcription_with_ai(
                 user_id=str(update.message.from_user.id),
                 message_id=str(update.message.message_id),
@@ -159,7 +186,7 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
         else:
             update.message.reply_text("Voice note saved, but I couldn't transcribe it.")
 
-        # Delete file
+        # 5.6) Delete file
         try:
             os.remove(file_path)
             logging.info(f"Deleted local file: {file_path}")
@@ -174,8 +201,6 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
 # 6) MAIN
 # -------------------------------------------------------------------
 def main():
-    # If you still need config.ini for Telegram token, keep this block;
-    # otherwise you can remove config usage entirely.
     config = configparser.ConfigParser()
     config.read("config.ini")
     BOT_TOKEN = config["telegram"]["BOT_TOKEN"]
