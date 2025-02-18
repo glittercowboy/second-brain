@@ -250,7 +250,50 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
         update.message.reply_text("Sorry, I couldn't process that voice note.")
 
 # -------------------------------------------------------------------
-# 8) MAIN
+# 8) SUMMARY HANDLERS
+# -------------------------------------------------------------------
+def daily_summary(update: Update, context: CallbackContext):
+    """Generates and sends a daily summary of journal entries."""
+    try:
+        # Send loading message
+        loading_message = update.message.reply_text("🔄 Generating your daily summary... This may take a minute.")
+        
+        summary = generate_daily_summary()
+        
+        # Format the summary as a nice message
+        message = "📝 *Daily Summary*\n\n"
+        for category, content in summary.items():
+            message += f"*{category}*:\n{content}\n\n"
+        
+        # Delete loading message and send summary
+        loading_message.delete()
+        update.message.reply_text(message, parse_mode='Markdown')
+    except Exception as e:
+        logging.error(f"Error generating daily summary: {e}")
+        update.message.reply_text("Sorry, I couldn't generate the daily summary. Please try again later.")
+
+def weekly_summary(update: Update, context: CallbackContext):
+    """Generates and sends a weekly summary of journal entries."""
+    try:
+        # Send loading message
+        loading_message = update.message.reply_text("🔄 Generating your weekly summary... This may take a minute.")
+        
+        summary = generate_weekly_summary()
+        
+        # Format the summary as a nice message
+        message = "📊 *Weekly Summary*\n\n"
+        for category, content in summary.items():
+            message += f"*{category}*:\n{content}\n\n"
+        
+        # Delete loading message and send summary
+        loading_message.delete()
+        update.message.reply_text(message, parse_mode='Markdown')
+    except Exception as e:
+        logging.error(f"Error generating weekly summary: {e}")
+        update.message.reply_text("Sorry, I couldn't generate the weekly summary. Please try again later.")
+
+# -------------------------------------------------------------------
+# 9) MAIN
 # -------------------------------------------------------------------
 def main():
     config = configparser.ConfigParser()
@@ -275,8 +318,10 @@ def main():
 
     # Add handlers
     dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("daily", daily_summary))
+    dp.add_handler(CommandHandler("weekly", weekly_summary))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
     dp.add_handler(MessageHandler(Filters.voice, voice_handler))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))  # Add text handler
 
     updater.start_polling()
     logging.info("Bot is running... Press Ctrl+C to stop.")
