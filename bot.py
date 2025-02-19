@@ -27,7 +27,7 @@ from telegram.ext import (
 import whisper
 
 # Database imports
-from database import initialize_db, insert_transcription_with_ai, delete_last_entry, generate_daily_summary, generate_weekly_summary
+from database import initialize_db, insert_transcription_with_ai, delete_last_entry
 
 # OpenAI
 import openai
@@ -261,11 +261,8 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
 def get_start_keyboard():
     """Creates the main menu keyboard."""
     keyboard = [
-        [InlineKeyboardButton("📊 Summaries", callback_data='view_summaries')],
         [
-            InlineKeyboardButton("📅 Daily", callback_data='summary_daily'),
-            InlineKeyboardButton("📈 Weekly", callback_data='summary_weekly'),
-            InlineKeyboardButton("📋 Monthly", callback_data='summary_monthly')
+            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -274,8 +271,7 @@ def get_entry_keyboard():
     """Creates the keyboard shown after a new entry."""
     keyboard = [
         [
-            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last'),
-            InlineKeyboardButton("📊 View Summaries", callback_data='view_summaries')
+            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -289,143 +285,6 @@ def get_confirmation_keyboard():
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
-
-def get_summary_keyboard():
-    """Creates the summary selection keyboard."""
-    keyboard = [
-        [InlineKeyboardButton("📊 Summaries", callback_data='view_summaries')],
-        [
-            InlineKeyboardButton("📅 Daily", callback_data='summary_daily'),
-            InlineKeyboardButton("📈 Weekly", callback_data='summary_weekly'),
-            InlineKeyboardButton("📋 Monthly", callback_data='summary_monthly')
-        ],
-        [InlineKeyboardButton("🏠 Back to Main Menu", callback_data='start')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-# -------------------------------------------------------------------
-# 9) SUMMARY HANDLERS
-# -------------------------------------------------------------------
-def generate_monthly_summary():
-    """Generates a monthly summary of journal entries."""
-    try:
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            
-            # Get entries from the last 30 days
-            thirty_days_ago = (datetime.now() - relativedelta(months=1)).isoformat()
-            cursor.execute("""
-                SELECT categories, transcription, timestamp 
-                FROM transcriptions 
-                WHERE timestamp > ? 
-                ORDER BY timestamp DESC
-            """, (thirty_days_ago,))
-            
-            entries = cursor.fetchall()
-            if not entries:
-                return {"No Entries": "No journal entries found in the last 30 days."}
-            
-            # Group entries by category
-            summary = {}
-            for entry in entries:
-                categories = entry[0].split(", ") if entry[0] else ["Uncategorized"]
-                entry_date = datetime.fromisoformat(entry[2]).strftime("%Y-%m-%d")
-                entry_preview = entry[1][:100] + "..." if len(entry[1]) > 100 else entry[1]
-                
-                for category in categories:
-                    if category not in summary:
-                        summary[category] = []
-                    summary[category].append(f"• {entry_date}: {entry_preview}")
-            
-            # Format each category's entries
-            formatted_summary = {}
-            for category, entries in summary.items():
-                formatted_summary[category] = "\n".join(entries[-5:])  # Show last 5 entries per category
-            
-            return formatted_summary
-            
-    except Exception as e:
-        logging.error(f"Error generating monthly summary: {e}")
-        return {"Error": "Could not generate monthly summary."}
-
-def send_summary(update: Update, context: CallbackContext, summary_type: str):
-    """Sends a summary (daily, weekly, or monthly) with proper formatting."""
-    try:
-        # Send loading message
-        if hasattr(update, 'callback_query'):
-            loading_message = update.callback_query.message.reply_text(
-                f"🔄 Analyzing your {summary_type} journal entries... This may take a minute."
-            )
-        else:
-            loading_message = update.message.reply_text(
-                f"🔄 Analyzing your {summary_type} journal entries... This may take a minute."
-            )
-        
-        # Generate appropriate summary
-        if summary_type == 'daily':
-            summary = generate_daily_summary()
-            title = "📅 *Your Day in Review*"
-        elif summary_type == 'weekly':
-            summary = generate_weekly_summary()
-            title = "📈 *Your Week in Review*"
-        else:  # monthly
-            summary = generate_monthly_summary()
-            title = "📋 *Your Month in Review*"
-        
-        # Format the summary as a nice message
-        message = f"{title}\n\n"
-        
-        if "Error" in summary:
-            message = f"❌ {summary['Error']}"
-            if "Details" in summary:
-                logging.error(f"GPT Analysis Error: {summary['Details']}")
-        else:
-            # Add overview
-            if "Overview" in summary:
-                message += f"*Overview*\n{summary['Overview']}\n\n"
-            
-            # Add themes
-            if "Themes" in summary:
-                message += f"*Key Themes*\n{summary['Themes']}\n\n"
-            
-            # Add category analysis
-            if "Categories" in summary:
-                message += "*Category Analysis*\n"
-                for category, analysis in summary["Categories"].items():
-                    message += f"*{category}*\n{analysis}\n\n"
-            
-            # Add insights
-            if "Insights" in summary:
-                message += f"*Insights & Suggestions*\n{summary['Insights']}"
-        
-        # Delete loading message
-        loading_message.delete()
-        
-        # Send with summary keyboard
-        keyboard = get_summary_keyboard()
-        if hasattr(update, 'callback_query'):
-            update.callback_query.message.edit_text(
-                message, 
-                parse_mode='Markdown',
-                reply_markup=keyboard
-            )
-        else:
-            update.message.reply_text(
-                message,
-                parse_mode='Markdown',
-                reply_markup=keyboard
-            )
-            
-    except Exception as e:
-        logging.error(f"Error generating {summary_type} summary: {e}")
-        error_msg = f"Sorry, I couldn't generate the {summary_type} summary. Please try again later."
-        if hasattr(update, 'callback_query'):
-            update.callback_query.message.edit_text(
-                error_msg,
-                reply_markup=get_summary_keyboard()
-            )
-        else:
-            update.message.reply_text(error_msg)
 
 # -------------------------------------------------------------------
 # 10) CALLBACK QUERY HANDLER
@@ -469,23 +328,9 @@ def handle_button(update: Update, context: CallbackContext) -> None:
             keyboard = get_start_keyboard()
             query.message.edit_text("✅ Entry kept safe!", reply_markup=keyboard)
             
-        elif query.data == 'view_summaries':
-            # Show summary options
-            message = "📊 Choose a summary type:"
-            keyboard = get_summary_keyboard()
-            query.message.edit_text(message, reply_markup=keyboard)
-            
-        elif query.data.startswith('summary_'):
-            # Generate and show appropriate summary
-            summary_type = query.data.split('_')[1]  # daily, weekly, or monthly
-            send_summary(update, context, summary_type)
-            
     except Exception as e:
-        logging.error(f"Error handling button press: {e}")
-        query.message.edit_text(
-            "Sorry, something went wrong. Please try again.",
-            reply_markup=get_start_keyboard()
-        )
+        logging.error(f"Error in button handler: {e}")
+        query.message.edit_text("❌ Sorry, something went wrong.")
 
 # -------------------------------------------------------------------
 # 11) MAIN
@@ -513,10 +358,6 @@ def main():
 
     # Add handlers
     dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("daily", lambda u, c: send_summary(u, c, 'daily')))
-    dp.add_handler(CommandHandler("weekly", lambda u, c: send_summary(u, c, 'weekly')))
-    dp.add_handler(CommandHandler("monthly", lambda u, c: send_summary(u, c, 'monthly')))
-    dp.add_handler(CommandHandler("delete_last", lambda u, c: handle_button(u._get_callback(), c)))
     dp.add_handler(CallbackQueryHandler(handle_button))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
     dp.add_handler(MessageHandler(Filters.voice, voice_handler))
