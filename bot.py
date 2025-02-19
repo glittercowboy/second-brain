@@ -27,7 +27,7 @@ from telegram.ext import (
 import whisper
 
 # Database imports
-from database import initialize_db, insert_transcription_with_ai, delete_last_entry, generate_daily_summary, generate_weekly_summary
+from database import initialize_db, insert_transcription_with_ai #delete_last_entry, generate_daily_summary, generate_weekly_summary
 
 # OpenAI
 import openai
