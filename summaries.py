@@ -5,17 +5,13 @@ It includes functions to create daily, weekly, and monthly summaries.
 Each summary:
   - Queries the 'transcriptions' table for entries since a given time.
   - Groups entries by exactly four categories: Work, Health, Relationships, and Purpose.
-  - Uses GPT‑4 to produce a concise summary for each category.
+  - Uses GPT‑4 with an enhanced, dynamic prompt to produce a concise, category-specific summary.
   - Saves the summary as a JSON file.
 
 Dependencies:
   - sqlite3, datetime, json, logging (standard library)
   - openai (for GPT‑4 summarization)
   - configparser (to load API keys from config.ini)
-
-Before running, ensure that:
-  - Your journal.db exists and has entries.
-  - Your config.ini includes your OPENAI_API_KEY.
 """
 
 import sqlite3
@@ -25,11 +21,36 @@ import json
 import openai
 import configparser
 
-# Database file name – make sure it's in the same folder as this script.
+# Define the database file name – ensure it's in the same folder as this script.
 DB_NAME = "journal.db"
 
-# Define the only allowed categories.
-ALLOWED_CATEGORIES = {"Work", "Health", "Relationships", "Purpose"}
+# Define the allowed categories along with their detailed definitions.
+ALLOWED_CATEGORIES = {
+    "Work": (
+        "Work encompasses your professional and productive activities – whether that's a career, "
+        "business, education, or other meaningful work. This includes professional growth, accomplishments, "
+        "financial stability, and the skills you develop. It's about how you contribute value and earn your livelihood."
+    ),
+    "Health": (
+        "Health covers both physical and mental wellbeing. This means taking care of your body through exercise, "
+        "nutrition, and rest, as well as maintaining emotional and psychological wellness through stress management, "
+        "mindfulness, and mental health care. It's the foundation that enables everything else."
+    ),
+    "Relationships": (
+        "Relationships refers to all your human connections – family, friends, romantic partners, and community. "
+        "This includes the quality of these relationships, how you nurture them, your social support system, and your "
+        "ability to form and maintain meaningful bonds with others."
+    ),
+    "Purpose": (
+        "Purpose represents your sense of meaning and direction in life. This includes your values, beliefs, personal growth, "
+        "and the impact you want to have on the world. It's about understanding why you do what you do and feeling that your "
+        "life has significance beyond just daily tasks."
+    )
+}
+
+# -------------------------------------------------------------------
+# SECTION: Database Query Functions
+# -------------------------------------------------------------------
 
 def query_entries_since(start_time: datetime):
     """
@@ -39,7 +60,11 @@ def query_entries_since(start_time: datetime):
     try:
         with sqlite3.connect(DB_NAME) as conn:
             cursor = conn.cursor()
-            query = "SELECT transcription, categories, keywords, timestamp FROM transcriptions WHERE timestamp >= ?"
+            query = """
+                SELECT transcription, categories, keywords, timestamp 
+                FROM transcriptions 
+                WHERE timestamp >= ?
+            """
             cursor.execute(query, (start_time.isoformat(),))
             rows = cursor.fetchall()
             return rows
@@ -53,8 +78,8 @@ def group_entries_by_category(entries):
     Each entry’s categories are normalized to title case.
     Returns a dictionary mapping each allowed category to a list of transcription texts.
     """
-    # Initialize dictionary with empty lists for the allowed categories
-    grouped = {category: [] for category in ALLOWED_CATEGORIES}
+    # Initialize dictionary with empty lists for each allowed category.
+    grouped = {category: [] for category in ALLOWED_CATEGORIES.keys()}
     
     for entry in entries:
         transcription, cats, _, _ = entry
@@ -66,9 +91,14 @@ def group_entries_by_category(entries):
                     grouped[cat].append(transcription)
     return grouped
 
+# -------------------------------------------------------------------
+# SECTION: GPT‑4 Summarization with Enhanced Prompt
+# -------------------------------------------------------------------
+
 def generate_summary_for_category(category, texts):
     """
-    Uses GPT‑4 to generate a summary for the provided list of texts.
+    Uses GPT‑4 with an enhanced prompt to generate a summary for the provided list of texts,
+    focusing exclusively on details relevant to the specified category.
     Returns the generated summary as a string.
     """
     if not texts:
@@ -76,31 +106,47 @@ def generate_summary_for_category(category, texts):
     
     # Combine all entries for this category into one text block.
     combined_text = "\n".join(texts)
+    
+    # Retrieve the detailed definition for the category.
+    definition = ALLOWED_CATEGORIES.get(category, "No definition provided.")
+    
+    # Create a dynamic prompt template that injects the category definition and instructs GPT‑4.
+    prompt_text = (
+        f"You are a summarization assistant. For the category **{category}**, defined as:\n\n"
+        f"{definition}\n\n"
+        "Summarize the following diary entries by focusing exclusively on aspects relevant to this category. "
+        "Ignore any information pertaining to other categories. Output your response as valid JSON with a single key 'summary'. "
+        "Do not include any additional text.\n\n"
+        f"Diary entries:\n{combined_text}"
+    )
+    
     try:
+        # Prepare the messages for the ChatCompletion API call.
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an assistant that summarizes personal diary entries. "
-                    "Generate a concise summary highlighting key events, emotions, and recurring themes."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"Summarize the following diary entries for the category '{category}':\n\n{combined_text}"
-            }
+            {"role": "system", "content": "You are a helpful summarization assistant."},
+            {"role": "user", "content": prompt_text}
         ]
+        
+        # Call the GPT‑4 API.
         response = openai.ChatCompletion.create(
             model="gpt-4",
             messages=messages,
             temperature=0.5,
             max_tokens=300
         )
-        summary = response.choices[0].message.content.strip()
+        response_text = response.choices[0].message.content.strip()
+        
+        # Parse the JSON output from GPT‑4.
+        data = json.loads(response_text)
+        summary = data.get("summary", "Summary not provided in expected format.")
         return summary
     except Exception as e:
         logging.error(f"Error generating summary for {category}: {e}")
         return "Summary generation failed."
+
+# -------------------------------------------------------------------
+# SECTION: Summary Generation Functions (Daily, Weekly, Monthly)
+# -------------------------------------------------------------------
 
 def generate_daily_summary():
     """
@@ -108,13 +154,13 @@ def generate_daily_summary():
     Returns a dictionary with the allowed categories as keys and summaries as values.
     """
     now = datetime.now()
-    # Start of today (local time)
+    # Define the start of today (local time).
     start_time = datetime(now.year, now.month, now.day)
     entries = query_entries_since(start_time)
     grouped = group_entries_by_category(entries)
     
     daily_summary = {}
-    for category in ALLOWED_CATEGORIES:
+    for category in ALLOWED_CATEGORIES.keys():
         texts = grouped.get(category, [])
         daily_summary[category] = generate_summary_for_category(category, texts)
     return daily_summary
@@ -130,7 +176,7 @@ def generate_weekly_summary():
     grouped = group_entries_by_category(entries)
     
     weekly_summary = {}
-    for category in ALLOWED_CATEGORIES:
+    for category in ALLOWED_CATEGORIES.keys():
         texts = grouped.get(category, [])
         weekly_summary[category] = generate_summary_for_category(category, texts)
     return weekly_summary
@@ -146,10 +192,14 @@ def generate_monthly_summary():
     grouped = group_entries_by_category(entries)
     
     monthly_summary = {}
-    for category in ALLOWED_CATEGORIES:
+    for category in ALLOWED_CATEGORIES.keys():
         texts = grouped.get(category, [])
         monthly_summary[category] = generate_summary_for_category(category, texts)
     return monthly_summary
+
+# -------------------------------------------------------------------
+# SECTION: Utility Function to Save Summary to File
+# -------------------------------------------------------------------
 
 def save_summary_to_file(summary, filename):
     """
@@ -162,9 +212,12 @@ def save_summary_to_file(summary, filename):
     except Exception as e:
         logging.error(f"Error saving summary to file: {e}")
 
-# For testing purposes, you can run this module directly.
+# -------------------------------------------------------------------
+# SECTION: Main (For Testing Purposes)
+# -------------------------------------------------------------------
+
 if __name__ == "__main__":
-    # Load API key from config.ini
+    # Load API key from config.ini.
     config = configparser.ConfigParser()
     config.read("config.ini")
     openai.api_key = config["openai"]["OPENAI_API_KEY"]
