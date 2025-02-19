@@ -3,21 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Journal | Second Brain</title>
+    <title>My Journal</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
     <div class="container">
-        <nav class="main-nav">
-            <a href="/" class="nav-link active">Journal</a>
-            <a href="/patterns" class="nav-link">Patterns</a>
-            <a href="/tags" class="nav-link">Tags</a>
-            <a href="/archive" class="nav-link">Archive</a>
-        </nav>
-        
         <header>
+            <nav class="main-nav">
+                <a href="{{ url_for('journal') }}" class="active">Journal</a>
+                <a href="{{ url_for('patterns') }}">Patterns</a>
+                <a href="{{ url_for('questions') }}">Questions</a>
+                <a href="{{ url_for('reports') }}">Reports</a>
+            </nav>
             <div class="search-container">
                 <input type="text" id="searchInput" placeholder="Search your journal...">
             </div>
