@@ -20,9 +20,17 @@
         </header>
         
         <main>
-            <h1>Questions</h1>
-            <!-- Add your questions content here -->
+            <div id="chat-container">
+                <div id="chat-messages"></div>
+                <div class="chat-input-container">
+                    <textarea id="chat-input" placeholder="Ask me anything about your journal entries..." rows="1"></textarea>
+                    <button id="send-button">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
         </main>
     </div>
+    <script src="{{ url_for('static', filename='js/questions.js') }}"></script>
 </body>
 </html>

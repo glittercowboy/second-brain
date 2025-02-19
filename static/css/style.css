@@ -299,6 +299,76 @@ main::before {
     z-index: 99;
 }
 
+/* Chat interface styles */
+#chat-container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 1rem;
+}
+
+#chat-messages {
+    min-height: 400px;
+    max-height: calc(100vh - 250px);
+    overflow-y: auto;
+    margin-bottom: 1rem;
+}
+
+.message {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #e0e0e0;
+    line-height: 1.5;
+}
+
+.message:last-child {
+    border-bottom: none;
+}
+
+.user-message {
+    color: #000;
+}
+
+.ai-message {
+    color: #444;
+}
+
+.chat-input-container {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 1rem;
+}
+
+#chat-input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    font-family: 'Courier Prime', monospace;
+    resize: none;
+    min-height: 20px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+#send-button {
+    background: none;
+    border: none;
+    color: #666;
+    cursor: pointer;
+    padding: 0.5rem;
+    font-size: 1.2rem;
+    transition: color 0.3s ease;
+}
+
+#send-button:hover {
+    color: #000;
+}
+
+.stream-text {
+    white-space: pre-wrap;
+}
+
 /* Responsive design */
 @media (max-width: 600px) {
     .container {

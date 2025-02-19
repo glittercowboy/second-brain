@@ -1,6 +1,16 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response, stream_with_context
 import sqlite3
 from datetime import datetime
+import google.generativeai as genai
+import os
+import configparser
+
+# Load config
+config = configparser.ConfigParser()
+config.read('config.ini')
+
+# Configure Gemini
+genai.configure(api_key=config['gemini']['GEMINI_API_KEY'])
 
 app = Flask(__name__)
 
@@ -146,6 +156,78 @@ def reports_data():
     reports = cursor.fetchall()
     conn.close()
     return jsonify(reports)
+
+def get_all_entries():
+    print("Getting all entries from database...")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT timestamp, transcription FROM transcriptions ORDER BY timestamp DESC')
+    entries = cursor.fetchall()
+    conn.close()
+    
+    # Format entries into a nice string
+    entries_text = ""
+    for entry in entries:
+        timestamp = entry[0]
+        content = entry[1]
+        entries_text += f"\nDate: {timestamp}\n{content}\n---"
+    
+    print(f"Retrieved {len(entries)} entries")
+    return entries_text
+
+def stream_chat_response(message):
+    try:
+        print(f"Processing chat message: {message}")
+        
+        # Get your journal entries as context
+        journal_entries = get_all_entries()
+        
+        print("Setting up Gemini model...")
+        # Set up the model
+        model = genai.GenerativeModel('gemini-1.5-pro')
+        
+        # Create the prompt with context
+        prompt = f"""You are a helpful AI assistant analyzing someone's personal journal entries. 
+        Your task is to help them understand patterns, insights, and answer questions about their life based on their journal entries.
+        
+        Here are all their journal entries:
+        {journal_entries}
+        
+        Their question is: {message}
+        
+        Please provide a thoughtful, empathetic response based on the actual content of their journal entries.
+        If you can't find relevant information in the entries to answer their question, be honest about it."""
+        
+        print("Generating response from Gemini...")
+        # Stream the response
+        response = model.generate_content(prompt, stream=True)
+        
+        print("Starting to stream response...")
+        for chunk in response:
+            if chunk.text:
+                print(f"Streaming chunk: {chunk.text[:50]}...")
+                yield chunk.text
+    except Exception as e:
+        print(f"Error in stream_chat_response: {str(e)}")
+        yield f"Error: {str(e)}"
+
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    try:
+        print("Received chat request")
+        message = request.json.get('message')
+        if not message:
+            print("No message provided")
+            return jsonify({'error': 'No message provided'}), 400
+            
+        print(f"Processing message: {message}")
+        return Response(
+            stream_with_context(stream_chat_response(message)),
+            content_type='text/plain'
+        )
+    except Exception as e:
+        print(f"Error in chat endpoint: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5003)
