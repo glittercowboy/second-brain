@@ -1,10 +1,7 @@
 # Ignore configuration files with sensitive information
 config.ini
-
-# Python-related ignores
 __pycache__/
-*.py[cod]
-*$py.class
+*.pyc
 
 # Virtual environment
 venv/
