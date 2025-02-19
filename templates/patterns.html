@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patterns | Second Brain</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <nav class="main-nav">
+            <a href="/" class="nav-link">Journal</a>
+            <a href="/patterns" class="nav-link active">Patterns</a>
+        </nav>
+
+        <div class="patterns-container">
+            <section class="pattern-section">
+                <h2>Daily Entries</h2>
+                <div class="chart-wrapper">
+                    <canvas id="entriesChart"></canvas>
+                </div>
+            </section>
+
+            <section class="pattern-section">
+                <h2>Word Frequency</h2>
+                <div class="word-search">
+                    <input type="text" id="wordInput" placeholder="Enter a word to track...">
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="wordChart"></canvas>
+                </div>
+            </section>
+
+            <section class="pattern-section">
+                <h2>Average Entry Length</h2>
+                <div class="chart-wrapper">
+                    <canvas id="lengthChart"></canvas>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/patterns.js') }}"></script>
+</body>
+</html>

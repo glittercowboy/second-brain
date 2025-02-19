@@ -13,6 +13,10 @@ def get_db_connection():
 def index():
     return render_template('index.html')
 
+@app.route('/patterns')
+def patterns():
+    return render_template('patterns.html')
+
 @app.route('/api/categories')
 def get_categories():
     conn = get_db_connection()
@@ -107,6 +111,58 @@ def delete_entry(entry_id):
     conn.close()
     
     return jsonify({'success': True})
+
+@app.route('/api/stats/daily_entries')
+def get_daily_entries():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT DATE(timestamp) as date, COUNT(*) as count
+        FROM transcriptions
+        GROUP BY DATE(timestamp)
+        ORDER BY date DESC
+        LIMIT 30
+    ''')
+    data = [{'date': row[0], 'count': row[1]} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify(data)
+
+@app.route('/api/stats/word_frequency')
+def get_word_frequency():
+    word = request.args.get('word', '').lower()
+    if not word:
+        return jsonify([])
+        
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT DATE(timestamp) as date, 
+               COUNT(*) as total_entries,
+               SUM(CASE WHEN LOWER(transcription) LIKE ? THEN 1 ELSE 0 END) as word_count
+        FROM transcriptions
+        GROUP BY DATE(timestamp)
+        ORDER BY date DESC
+        LIMIT 30
+    ''', (f'%{word}%',))
+    data = [{'date': row[0], 'count': row[2]} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify(data)
+
+@app.route('/api/stats/entry_lengths')
+def get_entry_lengths():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT DATE(timestamp) as date, 
+               AVG(LENGTH(transcription)) as avg_length
+        FROM transcriptions
+        GROUP BY DATE(timestamp)
+        ORDER BY date DESC
+        LIMIT 30
+    ''')
+    data = [{'date': row[0], 'length': round(row[1], 2)} for row in cursor.fetchall()]
+    conn.close()
+    return jsonify(data)
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5003)
