@@ -302,21 +302,21 @@ main::before {
 /* Chat interface styles */
 #chat-container {
     max-width: 800px;
-    margin: 0 auto;
-    padding: 1rem;
+    margin: 20px auto;
+    padding: 20px;
 }
 
 #chat-messages {
-    min-height: 400px;
-    max-height: calc(100vh - 250px);
+    margin-bottom: 20px;
     overflow-y: auto;
-    margin-bottom: 1rem;
+    max-height: calc(100vh - 200px);
 }
 
 .message {
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #e0e0e0;
-    line-height: 1.5;
+    margin: 24px 0;
+    padding: 16px 0;
+    border-bottom: 1px solid #eee;
+    line-height: 1.6;
 }
 
 .message:last-child {
@@ -325,48 +325,85 @@ main::before {
 
 .user-message {
     color: #000;
+    font-weight: 500;
+}
+
+.user-message::before {
+    content: "You:";
+    display: block;
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 8px;
 }
 
 .ai-message {
-    color: #444;
+    color: #333;
 }
 
-.chat-input-container {
-    display: flex;
-    gap: 0.5rem;
-    align-items: flex-start;
-    border-top: 1px solid #e0e0e0;
-    padding-top: 1rem;
-}
-
-#chat-input {
-    flex: 1;
-    padding: 0.5rem;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    font-family: 'Courier Prime', monospace;
-    resize: none;
-    min-height: 20px;
-    max-height: 150px;
-    overflow-y: auto;
-}
-
-#send-button {
-    background: none;
-    border: none;
+.ai-message::before {
+    content: "Journal Assistant:";
+    display: block;
+    font-size: 0.9em;
     color: #666;
-    cursor: pointer;
-    padding: 0.5rem;
-    font-size: 1.2rem;
-    transition: color 0.3s ease;
-}
-
-#send-button:hover {
-    color: #000;
+    margin-bottom: 8px;
 }
 
 .stream-text {
     white-space: pre-wrap;
+}
+
+.chat-input-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    
+    padding: 20px;
+  
+}
+
+.chat-input-container textarea {
+    width: 100%;
+    max-width: 800px;
+    margin: 0 auto;
+    display: block;
+    padding: 12px;
+    font-size: 16px;
+    resize: none;
+    overflow: hidden;
+    height: 44px;
+    min-height: 44px;
+    max-height: 200px;
+    font-family: inherit;
+    line-height: 20px;
+}
+
+.chat-input-container button {
+    position: absolute;
+    right: calc(50% - 380px);
+    bottom: 28px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #666;
+}
+
+.chat-input-container button:hover {
+    color: #000;
+}
+
+@media (max-width: 800px) {
+    .chat-input-container {
+        padding: 10px;
+    }
+    
+    .chat-input-container textarea {
+        margin: 0 40px 0 0;
+    }
+    
+    .chat-input-container button {
+        right: 20px;
+    }
 }
 
 /* Responsive design */

@@ -190,13 +190,16 @@ def stream_chat_response(message):
         prompt = f"""You are a helpful AI assistant analyzing someone's personal journal entries. 
         Your task is to help them understand patterns, insights, and answer questions about their life based on their journal entries.
         
+        IMPORTANT: Do not use markdown formatting (no **, __, or other markup) in your responses. Use plain text only.
+        
         Here are all their journal entries:
         {journal_entries}
         
         Their question is: {message}
         
         Please provide a thoughtful, empathetic response based on the actual content of their journal entries.
-        If you can't find relevant information in the entries to answer their question, be honest about it."""
+        If you can't find relevant information in the entries to answer their question, be honest about it.
+        Remember to use plain text without any markdown formatting."""
         
         print("Generating response from Gemini...")
         # Stream the response

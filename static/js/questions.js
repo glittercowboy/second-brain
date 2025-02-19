@@ -3,10 +3,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-button');
 
+    // Set initial height
+    chatInput.style.height = '44px';
+
     // Auto-resize textarea as user types
     chatInput.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = (this.scrollHeight) + 'px';
+        // Temporarily remove height restriction to check content height
+        this.style.height = '0';
+        
+        // Calculate content height
+        const contentHeight = this.scrollHeight;
+        const minHeight = 44;
+        
+        // Only grow if content actually needs more than one line
+        if (contentHeight > minHeight) {
+            this.style.height = contentHeight + 'px';
+        } else {
+            this.style.height = minHeight + 'px';
+        }
     });
 
     // Send message when Enter is pressed (without Shift)
@@ -47,9 +61,9 @@ document.addEventListener('DOMContentLoaded', function() {
         // Add user message
         addMessage(message, true);
         
-        // Clear input
+        // Clear input and reset height
         chatInput.value = '';
-        chatInput.style.height = 'auto';
+        chatInput.style.height = '44px';
 
         // Create message container for AI response
         const aiMessage = addMessage('', false);
