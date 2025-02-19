@@ -27,7 +27,11 @@ from telegram.ext import (
 import whisper
 
 # Database imports
+<<<<<<< HEAD
 from database import initialize_db, insert_transcription_with_ai #delete_last_entry, generate_daily_summary, generate_weekly_summary
+=======
+from database import initialize_db, insert_transcription_with_ai, delete_last_entry
+>>>>>>> 833c40fb13617cac0933e6cd6571571bbf9c7b05
 
 # OpenAI
 import openai
@@ -276,11 +280,8 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
 def get_start_keyboard():
     """Creates the main menu keyboard."""
     keyboard = [
-        [InlineKeyboardButton("📊 Summaries", callback_data='view_summaries')],
         [
-            InlineKeyboardButton("📅 Daily", callback_data='summary_daily'),
-            InlineKeyboardButton("📈 Weekly", callback_data='summary_weekly'),
-            InlineKeyboardButton("📋 Monthly", callback_data='summary_monthly')
+            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -289,8 +290,7 @@ def get_entry_keyboard():
     """Creates the keyboard shown after a new entry."""
     keyboard = [
         [
-            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last'),
-            InlineKeyboardButton("📊 View Summaries", callback_data='view_summaries')
+            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -305,6 +305,7 @@ def get_confirmation_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
+<<<<<<< HEAD
 def get_summary_keyboard():
     """Creates the summary selection keyboard."""
     keyboard = [
@@ -442,6 +443,8 @@ def send_summary(update: Update, context: CallbackContext, summary_type: str):
         else:
             update.message.reply_text(error_msg)
 
+=======
+>>>>>>> 833c40fb13617cac0933e6cd6571571bbf9c7b05
 # -------------------------------------------------------------------
 # 11) CALLBACK QUERY HANDLER
 # -------------------------------------------------------------------
@@ -484,23 +487,9 @@ def handle_button(update: Update, context: CallbackContext) -> None:
             keyboard = get_start_keyboard()
             query.message.edit_text("✅ Entry kept safe!", reply_markup=keyboard)
             
-        elif query.data == 'view_summaries':
-            # Show summary options
-            message = "📊 Choose a summary type:"
-            keyboard = get_summary_keyboard()
-            query.message.edit_text(message, reply_markup=keyboard)
-            
-        elif query.data.startswith('summary_'):
-            # Generate and show appropriate summary
-            summary_type = query.data.split('_')[1]  # daily, weekly, or monthly
-            send_summary(update, context, summary_type)
-            
     except Exception as e:
-        logging.error(f"Error handling button press: {e}")
-        query.message.edit_text(
-            "Sorry, something went wrong. Please try again.",
-            reply_markup=get_start_keyboard()
-        )
+        logging.error(f"Error in button handler: {e}")
+        query.message.edit_text("❌ Sorry, something went wrong.")
 
 # -------------------------------------------------------------------
 # 12) MAIN
@@ -528,10 +517,6 @@ def main():
 
     # Add handlers
     dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("daily", lambda u, c: send_summary(u, c, 'daily')))
-    dp.add_handler(CommandHandler("weekly", lambda u, c: send_summary(u, c, 'weekly')))
-    dp.add_handler(CommandHandler("monthly", lambda u, c: send_summary(u, c, 'monthly')))
-    dp.add_handler(CommandHandler("delete_last", lambda u, c: handle_button(u._get_callback(), c)))
     dp.add_handler(CallbackQueryHandler(handle_button))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, text_handler))
     dp.add_handler(MessageHandler(Filters.voice, voice_handler))
