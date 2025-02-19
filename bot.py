@@ -41,7 +41,19 @@ logging.basicConfig(
 )
 
 # -------------------------------------------------------------------
-# 2) TRANSCRIBE AUDIO FUNCTION
+# 2) AUTHORIZATION FUNCTION
+# -------------------------------------------------------------------
+def is_authorized(user_id: int) -> bool:
+    """
+    Check if a user is authorized to use the bot.
+    """
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    authorized_users = json.loads(config.get('Auth', 'authorized_users', fallback='[]'))
+    return str(user_id) in authorized_users
+
+# -------------------------------------------------------------------
+# 3) TRANSCRIBE AUDIO FUNCTION
 # -------------------------------------------------------------------
 def transcribe_audio(file_path: str) -> str:
     """
@@ -57,7 +69,7 @@ def transcribe_audio(file_path: str) -> str:
         return None
 
 # -------------------------------------------------------------------
-# 3) AI CATEGORIZE & EXTRACT (MULTIPLE CATEGORIES) WITH GPT-4
+# 4) AI CATEGORIZE & EXTRACT (MULTIPLE CATEGORIES) WITH GPT-4
 # -------------------------------------------------------------------
 def categorize_and_extract(text: str) -> (str, str):
     """
@@ -135,7 +147,7 @@ Return JSON ONLY, e.g.:
         return ("", "")
 
 # -------------------------------------------------------------------
-# 4) PROCESS TEXT AND SAVE TO DB
+# 5) PROCESS TEXT AND SAVE TO DB
 # -------------------------------------------------------------------
 def process_and_save_text(text: str, user_id: str, message_id: str) -> str:
     """
@@ -172,9 +184,13 @@ def process_and_save_text(text: str, user_id: str, message_id: str) -> str:
         return "Sorry, I couldn't process that message."
 
 # -------------------------------------------------------------------
-# 5) COMMAND HANDLER: /start
+# 6) COMMAND HANDLER: /start
 # -------------------------------------------------------------------
 def start(update: Update, context: CallbackContext) -> None:
+    if not is_authorized(update.effective_user.id):
+        update.message.reply_text("Sorry, you are not authorized to use this bot. Please contact the bot owner.")
+        return
+    
     welcome_message = (
         "Hello, I'm your AI Journaling Bot!\n"
         "You can:\n"
@@ -186,12 +202,13 @@ def start(update: Update, context: CallbackContext) -> None:
     update.message.reply_text(welcome_message, reply_markup=keyboard)
 
 # -------------------------------------------------------------------
-# 6) TEXT MESSAGE HANDLER
+# 7) TEXT MESSAGE HANDLER
 # -------------------------------------------------------------------
 def text_handler(update: Update, context: CallbackContext) -> None:
-    """
-    Handles direct text input from the user.
-    """
+    if not is_authorized(update.effective_user.id):
+        update.message.reply_text("Sorry, you are not authorized to use this bot. Please contact the bot owner.")
+        return
+        
     try:
         text = update.message.text.strip()
         
@@ -214,15 +231,13 @@ def text_handler(update: Update, context: CallbackContext) -> None:
         update.message.reply_text("Sorry, I couldn't process that message.")
 
 # -------------------------------------------------------------------
-# 7) VOICE HANDLER
+# 8) VOICE HANDLER
 # -------------------------------------------------------------------
 def voice_handler(update: Update, context: CallbackContext) -> None:
-    """
-    - Downloads the voice file
-    - Transcribes with Whisper
-    - Processes text using common function
-    - Deletes local file
-    """
+    if not is_authorized(update.effective_user.id):
+        update.message.reply_text("Sorry, you are not authorized to use this bot. Please contact the bot owner.")
+        return
+
     try:
         # 7.1) Download
         voice_file = update.message.voice.get_file()
@@ -256,7 +271,7 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
         update.message.reply_text("Sorry, I couldn't process that voice note.")
 
 # -------------------------------------------------------------------
-# 8) KEYBOARD MARKUP HELPERS
+# 9) KEYBOARD MARKUP HELPERS
 # -------------------------------------------------------------------
 def get_start_keyboard():
     """Creates the main menu keyboard."""
@@ -304,7 +319,7 @@ def get_summary_keyboard():
     return InlineKeyboardMarkup(keyboard)
 
 # -------------------------------------------------------------------
-# 9) SUMMARY HANDLERS
+# 10) SUMMARY HANDLERS
 # -------------------------------------------------------------------
 def generate_monthly_summary():
     """Generates a monthly summary of journal entries."""
@@ -428,7 +443,7 @@ def send_summary(update: Update, context: CallbackContext, summary_type: str):
             update.message.reply_text(error_msg)
 
 # -------------------------------------------------------------------
-# 10) CALLBACK QUERY HANDLER
+# 11) CALLBACK QUERY HANDLER
 # -------------------------------------------------------------------
 def handle_button(update: Update, context: CallbackContext) -> None:
     """Handles callback queries from inline keyboard buttons."""
@@ -488,7 +503,7 @@ def handle_button(update: Update, context: CallbackContext) -> None:
         )
 
 # -------------------------------------------------------------------
-# 11) MAIN
+# 12) MAIN
 # -------------------------------------------------------------------
 def main():
     config = configparser.ConfigParser()
