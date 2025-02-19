@@ -3,26 +3,45 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patterns</title>
+    <title>Patterns - Second Brain</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <nav class="main-nav">
-                <a href="{{ url_for('journal') }}">Journal</a>
-                <a href="{{ url_for('patterns') }}" class="active">Patterns</a>
-                <a href="{{ url_for('questions') }}">Questions</a>
-                <a href="{{ url_for('reports') }}">Reports</a>
-            </nav>
-        </header>
-        
-        <main>
-            <h1>Patterns</h1>
-            <!-- Add your patterns content here -->
-        </main>
-    </div>
+    <header>
+        <nav class="main-nav">
+            <a href="{{ url_for('journal') }}">Journal</a>
+            <a href="{{ url_for('patterns') }}" class="active">Patterns</a>
+            <a href="{{ url_for('questions') }}">Questions</a>
+            <a href="{{ url_for('reports') }}">Reports</a>
+        </nav>
+    </header>
+    
+    <main>
+        <div class="patterns-container">
+            <div class="date-range-container">
+                <div class="date-inputs">
+                    <input type="date" id="startDate" aria-label="Start date">
+                    <span class="date-separator">to</span>
+                    <input type="date" id="endDate" aria-label="End date">
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <h2>Entries per Day</h2>
+                <canvas id="entriesChart"></canvas>
+            </div>
+
+            <div class="chart-section">
+                <h2>Average Words per Entry</h2>
+                <canvas id="wordsChart"></canvas>
+            </div>
+        </div>
+    </main>
+    
+    <script src="{{ url_for('static', filename='js/patterns.js') }}"></script>
 </body>
 </html>

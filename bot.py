@@ -301,7 +301,6 @@ def get_confirmation_keyboard():
     ]
     return InlineKeyboardMarkup(keyboard)
 
-<<<<<<< HEAD
 def get_summary_keyboard():
     """Creates the summary selection keyboard."""
     keyboard = [
@@ -439,8 +438,6 @@ def send_summary(update: Update, context: CallbackContext, summary_type: str):
         else:
             update.message.reply_text(error_msg)
 
-=======
->>>>>>> 833c40fb13617cac0933e6cd6571571bbf9c7b05
 # -------------------------------------------------------------------
 # 11) CALLBACK QUERY HANDLER
 # -------------------------------------------------------------------
