@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Journal</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="search-container">
+                <input type="text" id="searchInput" placeholder="Search your journal...">
+            </div>
+            <nav class="categories">
+                <!-- Categories will be populated by JavaScript -->
+            </nav>
+        </header>
+        
+        <main id="journalEntries">
+            <!-- Entries will be populated by JavaScript -->
+        </main>
+
+        <div class="loading" id="loadingSpinner" style="display: none;">
+            Loading more entries...
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h2>Edit Entry</h2>
+            <textarea id="editContent"></textarea>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeEditModal()">Cancel</button>
+                <button class="modal-btn primary" onclick="saveEdit()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <h2>Delete Entry</h2>
+            <p>Are you sure you want to delete this entry? This action cannot be undone.</p>
+            <div class="modal-actions">
+                <button class="modal-btn secondary" onclick="closeDeleteModal()">Cancel</button>
+                <button class="modal-btn primary" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
