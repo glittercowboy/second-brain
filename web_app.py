@@ -126,17 +126,9 @@ Assistant:"""
 def journal():
     return render_template('journal.html')
 
-@app.route('/patterns')
-def patterns():
-    return render_template('patterns.html')
-
 @app.route('/questions')
 def questions():
     return render_template('questions.html')
-
-@app.route('/reports')
-def reports():
-    return render_template('reports.html')
 
 # ---------------------------------------------
 # Chat API Endpoint
@@ -267,27 +259,6 @@ def delete_entry(entry_id):
     conn.close()
     return jsonify({'success': True})
 
-# ---------------------------------------------
-# Reports / Patterns / Stats Endpoints
-# ---------------------------------------------
-@app.route('/patterns/data')
-def patterns_data():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM patterns')
-    patterns = cursor.fetchall()
-    conn.close()
-    return jsonify(patterns)
-
-@app.route('/reports/data')
-def reports_data():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM reports')
-    reports = cursor.fetchall()
-    conn.close()
-    return jsonify(reports)
-
 @app.route('/api/journal_stats')
 def journal_stats():
     conn = get_db_connection()
@@ -351,131 +322,6 @@ def journal_stats():
         'words_per_entry': words_per_entry,
         'first_entry_date': first_entry_date
     })
-
-@app.route('/api/get_report')
-def get_report():
-    try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        category = request.args.get('category')
-        time_range = request.args.get('time_range')
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT content, generated_at
-            FROM reports
-            WHERE category = ? 
-            AND time_range = ?
-            AND start_date = ?
-            AND end_date = ?
-        ''', (category, time_range, start_date, end_date))
-        report = cursor.fetchone()
-        conn.close()
-
-        if report:
-            return jsonify({
-                'content': report[0],
-                'generated_at': report[1]
-            })
-        return jsonify(None)
-
-    except Exception as e:
-        logging.error(f"Error getting report: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/generate_report')
-def generate_report():
-    try:
-        start_date = request.args.get('start_date')
-        end_date = request.args.get('end_date')
-        category = request.args.get('category')
-        time_range = request.args.get('time_range')
-
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT timestamp, transcription, tags
-            FROM transcriptions
-            WHERE DATE(timestamp) >= ? AND DATE(timestamp) <= ?
-            ORDER BY timestamp
-        ''', (start_date, end_date))
-        entries = cursor.fetchall()
-
-        if not entries:
-            return jsonify({
-                'content': '<p>No journal entries found for this time period.</p>',
-                'generated_at': datetime.now().isoformat()
-            })
-
-        formatted_entries = []
-        for timestamp, text, tags in entries:
-            if tags:
-                tag_list = [t.strip() for t in tags.split(',')]
-            else:
-                tag_list = []
-            if category in tag_list:
-                formatted_entries.append({
-                    'date': timestamp,
-                    'text': text,
-                    'tags': tag_list
-                })
-
-        if not formatted_entries:
-            return jsonify({
-                'content': f'<p>No entries tagged with "{category}" found for this time period.</p>',
-                'generated_at': datetime.now().isoformat()
-            })
-
-        prompt = f'''You are analyzing journal entries for a personal development report. Focus on entries tagged with "{category}" from {start_date} to {end_date}.
-
-Here are the relevant entries:
-{json.dumps(formatted_entries, indent=2)}
-
-Please generate a detailed {time_range}ly report that:
-1. Identifies key themes, patterns, and insights specific to the {category} category
-2. Highlights significant developments or changes over this period
-3. Notes any challenges faced and how they were addressed
-4. Suggests potential areas for growth or improvement
-5. Provides actionable insights based on the journal entries
-
-Important guidelines:
-- Focus ONLY on content relevant to the {category} category
-- Ignore parts of entries that don't relate to {category}, even if they're in tagged entries
-- Be specific and reference actual events/thoughts from the entries
-- Format the response in clean HTML with appropriate headings and lists
-- Keep the tone analytical but personal
-- Don't include the dates of entries in the report unless particularly significant
-
-Structure the report with these sections:
-- Overview
-- Key Themes
-- Notable Progress
-- Challenges & Solutions
-- Recommendations
-'''
-
-        model = genai.GenerativeModel('gemini-1.5-pro')
-        response = model.generate_content(prompt)
-        formatted_response = response.text.replace('\n', '<br>')
-        generated_at = datetime.now().isoformat()
-
-        cursor.execute('''
-            INSERT OR REPLACE INTO reports 
-            (category, time_range, start_date, end_date, content, generated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (category, time_range, start_date, end_date, formatted_response, generated_at))
-        conn.commit()
-        conn.close()
-        
-        return jsonify({
-            'content': formatted_response,
-            'generated_at': generated_at
-        })
-
-    except Exception as e:
-        logging.error(f"Error generating report: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5003)
