@@ -1,4 +1,3 @@
-# bot.py
 """
 Phase 6: Cloud-Ready Telegram Bot
 --------------------------------------------------------------------
@@ -46,12 +45,11 @@ def is_authorized(user_id: int) -> bool:
     return str(user_id) in authorized_users
 
 # -------------------------------------------------------------------
-# 3) TRANSCRIBE AUDIO FUNCTION
+# 3) AUDIO TRANSCRIPTION
 # -------------------------------------------------------------------
 def transcribe_audio(file_path: str) -> str:
     """
-    Transcribes the given audio file using Whisper.
-    Returns the transcribed text, or None if there's an error.
+    Transcribe audio file using Whisper
     """
     try:
         model = whisper.load_model("base")
@@ -62,116 +60,77 @@ def transcribe_audio(file_path: str) -> str:
         return None
 
 # -------------------------------------------------------------------
-# 4) AI CATEGORIZE & EXTRACT (MULTIPLE CATEGORIES) WITH GPT-4
+# 4) GPT-4 INTEGRATION
 # -------------------------------------------------------------------
-def categorize_and_extract(text: str) -> (str, str):
+def categorize_and_extract(text: str) -> dict:
     """
-    Sends 'text' to GPT-4 to:
-      1) Possibly assign multiple categories from: Work, Health, Relationships, Purpose
-      2) Extract the most relevant keywords
-    Returns (comma-separated categories, comma-separated keywords).
+    Use GPT-4 to categorize and extract key information from text
     """
     try:
-        # The prompt merges your categorization & keyword instructions into one.
-        # We request JSON only, to parse easily.
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a classifier that categorizes diary entries into four possible buckets: "
-                    "Work, Health, Relationships, and Purpose. Then you also extract the most relevant keywords. "
-                    "Return your answer in valid JSON ONLY, with the format:\n\n"
-                    "{\n"
-                    '  "categories": ["Work", "Health"],\n'
-                    '  "keywords": ["Keyword1", "Keyword2"]\n'
-                    "}\n\n"
-                    "No extra text or punctuation beyond valid JSON."
-                )
-            },
-            {
-                "role": "user",
-                "content": f"""
-Text:
-\"\"\"{text}\"\"\"
+        prompt = f"""
+        Analyze this journal entry and provide:
+        1. The main emotion/mood
+        2. Key topics discussed
+        3. Any action items or goals mentioned
+        4. A brief, empathetic response
 
-Categorization Instructions:
-- You can output any subset of [Work, Health, Relationships, Purpose].
-- If multiple categories apply, list them all, exactly matching those category names.
-- Do not explain your reasoning or add extra text.
+        Journal entry: {text}
 
-Keyword Extraction Instructions:
-- Extract the most relevant keywords from this personal journal entry.
-- Focus on meaningful themes, emotions, and concepts.
-- Avoid generic or filler words.
-- Output them capitalized, separated by commas in JSON array form.
-
-Return JSON ONLY, e.g.:
-{{
-  "categories": ["Work", "Health"],
-  "keywords": ["Stress", "Deadlines", "Project"]
-}}
-                """
-            }
-        ]
+        Format the response as a JSON with these keys:
+        - emotion
+        - topics (list)
+        - action_items (list)
+        - response
+        """
 
         response = openai.ChatCompletion.create(
-            model="gpt-4",            # Use GPT-4
-            messages=messages,
-            temperature=0.3,
-            max_tokens=1000          # Increased token limit
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an empathetic AI journaling assistant."},
+                {"role": "user", "content": prompt}
+            ]
         )
 
-        # Extract the response text
-        raw_text = response.choices[0].message.content.strip()
+        # Extract and parse the JSON response
+        result = json.loads(response.choices[0].message.content)
+        return result
 
-        # Parse JSON
-        data = json.loads(raw_text)
-
-        # Convert arrays to comma-separated strings
-        cat_list = data.get("categories", [])
-        categories_str = ", ".join([c.strip() for c in cat_list])
-
-        kw_list = data.get("keywords", [])
-        keywords_str = ", ".join([k.strip() for k in kw_list])
-
-        return (categories_str, keywords_str)
     except Exception as e:
-        logging.error(f"Error in categorize_and_extract: {e}")
-        return ("", "")
+        logging.error(f"Error in GPT-4 processing: {e}")
+        return None
 
 # -------------------------------------------------------------------
-# 5) PROCESS TEXT AND SAVE TO DB
+# 5) TEXT PROCESSING
 # -------------------------------------------------------------------
 def process_and_save_text(text: str, user_id: str, message_id: str) -> str:
-    """
-    Common function to process text input (from voice or direct text):
-    1. Categorize and extract keywords
-    2. Save to database
-    3. Return formatted response
-    """
+    """Process text with GPT-4 and save to database"""
     try:
-        # 1) Categorize & Extract
-        categories_str, keywords_str = categorize_and_extract(text)
-
-        # 2) Save to DB
-        insert_transcription_with_ai(
-            user_id=user_id,
-            message_id=message_id,
-            transcription=text,
-            file_path="text_input",  # For text messages, no file path needed
-            categories=categories_str,
-            keywords=keywords_str
-        )
-
-        # 3) Format response
-        response = (
-            "Message received and processed!\n\n"
-            f"**Text**:\n{text}\n\n"
-            f"**Categories**: {categories_str}\n"
-            f"**Keywords**: {keywords_str}"
-        )
-        return response
-
+        # Get AI analysis
+        analysis = categorize_and_extract(text)
+        
+        if analysis:
+            # Save to database
+            insert_transcription_with_ai(
+                user_id=user_id,
+                message_id=message_id,
+                text=text,
+                ai_analysis=json.dumps(analysis)
+            )
+            
+            # Format response
+            response = (
+                f"✨ *Entry saved!*\n\n"
+                f"*Mood:* {analysis['emotion']}\n"
+                f"*Topics:* {', '.join(analysis['topics'])}\n\n"
+                f"*Response:* {analysis['response']}\n\n"
+                f"*Action Items:*\n" + 
+                "\n".join([f"• {item}" for item in analysis['action_items']])
+            )
+            
+            return response
+        else:
+            return "Sorry, I couldn't analyze that entry properly. But I've saved it!"
+            
     except Exception as e:
         logging.error(f"Error processing text: {e}")
         return "Sorry, I couldn't process that message."
@@ -181,7 +140,7 @@ def process_and_save_text(text: str, user_id: str, message_id: str) -> str:
 # -------------------------------------------------------------------
 def start(update: Update, context: CallbackContext) -> None:
     if not is_authorized(update.effective_user.id):
-        update.message.reply_text("Sorry, you are not authorized to use this bot. Please contact the bot owner.")
+        update.message.reply_text("Sorry, you are not authorized to use this bot.")
         return
     
     welcome_message = (
@@ -199,7 +158,7 @@ def start(update: Update, context: CallbackContext) -> None:
 # -------------------------------------------------------------------
 def text_handler(update: Update, context: CallbackContext) -> None:
     if not is_authorized(update.effective_user.id):
-        update.message.reply_text("Sorry, you are not authorized to use this bot. Please contact the bot owner.")
+        update.message.reply_text("Sorry, you are not authorized to use this bot.")
         return
         
     try:
@@ -217,7 +176,7 @@ def text_handler(update: Update, context: CallbackContext) -> None:
         )
         
         keyboard = get_entry_keyboard()
-        update.message.reply_text(response, reply_markup=keyboard)
+        update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
         
     except Exception as e:
         logging.error(f"Error handling text message: {e}")
@@ -228,7 +187,7 @@ def text_handler(update: Update, context: CallbackContext) -> None:
 # -------------------------------------------------------------------
 def voice_handler(update: Update, context: CallbackContext) -> None:
     if not is_authorized(update.effective_user.id):
-        update.message.reply_text("Sorry, you are not authorized to use this bot. Please contact the bot owner.")
+        update.message.reply_text("Sorry, you are not authorized to use this bot.")
         return
 
     try:
@@ -248,7 +207,7 @@ def voice_handler(update: Update, context: CallbackContext) -> None:
                 message_id=str(update.message.message_id)
             )
             keyboard = get_entry_keyboard()
-            update.message.reply_text(response, reply_markup=keyboard)
+            update.message.reply_text(response, reply_markup=keyboard, parse_mode='Markdown')
         else:
             update.message.reply_text("Voice note saved, but I couldn't transcribe it.")
 
@@ -270,40 +229,38 @@ def get_start_keyboard():
     """Creates the main menu keyboard."""
     keyboard = [
         [
-            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last')
+            InlineKeyboardButton("📝 New Entry", callback_data='new_entry'),
+            InlineKeyboardButton("🎙 Voice Note", callback_data='voice_note')
+        ],
+        [
+            InlineKeyboardButton("📊 Daily Summary", callback_data='daily'),
+            InlineKeyboardButton("📈 Weekly Summary", callback_data='weekly')
+        ],
+        [
+            InlineKeyboardButton("📋 Monthly Summary", callback_data='monthly'),
+            InlineKeyboardButton("⚙️ Settings", callback_data='settings')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_entry_keyboard():
-    """Creates the keyboard shown after a new entry."""
+    """Creates the keyboard shown after an entry is saved."""
     keyboard = [
         [
-            InlineKeyboardButton("❌ Delete Entry", callback_data='delete_last')
-        ]
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-def get_confirmation_keyboard():
-    """Creates a confirmation keyboard."""
-    keyboard = [
-        [
-            InlineKeyboardButton("✅ Yes, delete it", callback_data='confirm_delete'),
-            InlineKeyboardButton("❌ No, keep it", callback_data='cancel_delete')
+            InlineKeyboardButton("📊 Daily Summary", callback_data='daily'),
+            InlineKeyboardButton("📈 Weekly Summary", callback_data='weekly'),
+            InlineKeyboardButton("📋 Monthly", callback_data='monthly')
         ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
 def get_summary_keyboard():
-    """Creates the summary selection keyboard."""
+    """Creates the keyboard shown with summaries."""
     keyboard = [
-        [InlineKeyboardButton("📊 Summaries", callback_data='view_summaries')],
         [
-            InlineKeyboardButton("📅 Daily", callback_data='summary_daily'),
-            InlineKeyboardButton("📈 Weekly", callback_data='summary_weekly'),
-            InlineKeyboardButton("📋 Monthly", callback_data='summary_monthly')
-        ],
-        [InlineKeyboardButton("🏠 Back to Main Menu", callback_data='start')]
+            InlineKeyboardButton("🔄 Refresh", callback_data='refresh'),
+            InlineKeyboardButton("📝 New Entry", callback_data='new_entry')
+        ]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -313,41 +270,8 @@ def get_summary_keyboard():
 def generate_monthly_summary():
     """Generates a monthly summary of journal entries."""
     try:
-        with sqlite3.connect(DB_NAME) as conn:
-            cursor = conn.cursor()
-            
-            # Get entries from the last 30 days
-            thirty_days_ago = (datetime.now() - relativedelta(months=1)).isoformat()
-            cursor.execute("""
-                SELECT categories, transcription, timestamp 
-                FROM transcriptions 
-                WHERE timestamp > ? 
-                ORDER BY timestamp DESC
-            """, (thirty_days_ago,))
-            
-            entries = cursor.fetchall()
-            if not entries:
-                return {"No Entries": "No journal entries found in the last 30 days."}
-            
-            # Group entries by category
-            summary = {}
-            for entry in entries:
-                categories = entry[0].split(", ") if entry[0] else ["Uncategorized"]
-                entry_date = datetime.fromisoformat(entry[2]).strftime("%Y-%m-%d")
-                entry_preview = entry[1][:100] + "..." if len(entry[1]) > 100 else entry[1]
-                
-                for category in categories:
-                    if category not in summary:
-                        summary[category] = []
-                    summary[category].append(f"• {entry_date}: {entry_preview}")
-            
-            # Format each category's entries
-            formatted_summary = {}
-            for category, entries in summary.items():
-                formatted_summary[category] = "\n".join(entries[-5:])  # Show last 5 entries per category
-            
-            return formatted_summary
-            
+        # TODO: Implement monthly summary generation
+        pass
     except Exception as e:
         logging.error(f"Error generating monthly summary: {e}")
         return {"Error": "Could not generate monthly summary."}
@@ -365,40 +289,32 @@ def send_summary(update: Update, context: CallbackContext, summary_type: str):
                 f"🔄 Analyzing your {summary_type} journal entries... This may take a minute."
             )
         
-        # Generate appropriate summary
-        if summary_type == 'daily':
+        # Get summary based on type
+        if summary_type == "daily":
             summary = generate_daily_summary()
-            title = "📅 *Your Day in Review*"
-        elif summary_type == 'weekly':
+        elif summary_type == "weekly":
             summary = generate_weekly_summary()
-            title = "📈 *Your Week in Review*"
         else:  # monthly
             summary = generate_monthly_summary()
-            title = "📋 *Your Month in Review*"
         
-        # Format the summary as a nice message
-        message = f"{title}\n\n"
-        
+        # Format message
         if "Error" in summary:
             message = f"❌ {summary['Error']}"
-            if "Details" in summary:
-                logging.error(f"GPT Analysis Error: {summary['Details']}")
         else:
-            # Add overview
-            if "Overview" in summary:
-                message += f"*Overview*\n{summary['Overview']}\n\n"
+            message = f"*{summary_type.title()} Summary*\n\n"
             
-            # Add themes
-            if "Themes" in summary:
-                message += f"*Key Themes*\n{summary['Themes']}\n\n"
+            if "Mood" in summary:
+                message += f"*Overall Mood*\n{summary['Mood']}\n\n"
             
-            # Add category analysis
-            if "Categories" in summary:
-                message += "*Category Analysis*\n"
-                for category, analysis in summary["Categories"].items():
-                    message += f"*{category}*\n{analysis}\n\n"
+            if "Topics" in summary:
+                message += "*Key Topics*\n"
+                for topic in summary['Topics']:
+                    message += f"• {topic}\n"
+                message += "\n"
             
-            # Add insights
+            if "Progress" in summary:
+                message += f"*Progress*\n{summary['Progress']}\n\n"
+            
             if "Insights" in summary:
                 message += f"*Insights & Suggestions*\n{summary['Insights']}"
         
