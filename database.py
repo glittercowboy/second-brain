@@ -7,26 +7,23 @@ It maintains the same functionality but with improved scalability.
 
 import logging
 from datetime import datetime
-import configparser
+import os
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-
-DB_NAME = "journal.db"
 
 def get_db_connection():
     """
     Establishes and returns a new PostgreSQL database connection.
+    Uses environment variables for configuration.
     """
-    config = configparser.ConfigParser()
-    config.read('database_config.ini')
-    
     try:
         conn = psycopg2.connect(
-            host=config['PostgreSQL']['host'],
-            database=config['PostgreSQL']['database'],
-            user=config['PostgreSQL']['user'],
-            password=config['PostgreSQL']['password'],
-            port=config['PostgreSQL']['port']
+            host=os.getenv('POSTGRES_HOST', 'localhost'),
+            database=os.getenv('POSTGRES_DATABASE', 'postgres'),
+            user=os.getenv('POSTGRES_USER', 'postgres'),
+            password=os.getenv('POSTGRES_PASSWORD', ''),
+            port=os.getenv('POSTGRES_PORT', '5432')
         )
         return conn
     except Exception as e:
