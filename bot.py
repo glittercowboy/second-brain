@@ -1,22 +1,17 @@
 # bot.py
 """
-Phase 5 (Modified for GPT-4 + Extended Prompts + Larger Max Tokens):
+Phase 6: Cloud-Ready Telegram Bot
 --------------------------------------------------------------------
-- Uses GPT-4 via ChatCompletion
-- Larger max_tokens (1000)
-- Multi-category classification (Work, Health, Relationships, Purpose)
-- More specific instructions for categorization and keyword extraction
-- Outputs in JSON only
-- Deletes local .ogg file after processing
+- Uses environment variables for configuration
+- PostgreSQL database support
+- GPT-4 integration
+- Multi-category classification
 """
 
 import os
 import logging
 import json
-import configparser
 from datetime import datetime
-import sqlite3
-from dateutil.relativedelta import relativedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters, 
@@ -27,7 +22,7 @@ from telegram.ext import (
 import whisper
 
 # Database imports
-from database import initialize_db, insert_transcription_with_ai ##delete_last_entry
+from database import initialize_db, insert_transcription_with_ai
 
 # OpenAI
 import openai
@@ -47,9 +42,7 @@ def is_authorized(user_id: int) -> bool:
     """
     Check if a user is authorized to use the bot.
     """
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-    authorized_users = json.loads(config.get('Auth', 'authorized_users', fallback='[]'))
+    authorized_users = os.getenv('AUTHORIZED_USERS', '').split(',')
     return str(user_id) in authorized_users
 
 # -------------------------------------------------------------------
@@ -488,18 +481,16 @@ def handle_button(update: Update, context: CallbackContext) -> None:
 # 12) MAIN
 # -------------------------------------------------------------------
 def main():
-    config = configparser.ConfigParser()
-    config.read("config.ini")
-    BOT_TOKEN = config["telegram"]["BOT_TOKEN"]
-    OPENAI_API_KEY = config["openai"]["OPENAI_API_KEY"]
+    BOT_TOKEN = os.getenv('BOT_TOKEN')
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
     # Set the OpenAI API key
     openai.api_key = OPENAI_API_KEY
 
     if not BOT_TOKEN:
-        raise ValueError("Error: BOT_TOKEN not found in config.ini.")
+        raise ValueError("Error: BOT_TOKEN not found in environment variables.")
     if not OPENAI_API_KEY:
-        raise ValueError("Error: OPENAI_API_KEY not found in config.ini.")
+        raise ValueError("Error: OPENAI_API_KEY not found in environment variables.")
 
     # Init DB
     initialize_db()
