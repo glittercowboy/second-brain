@@ -1,33 +1,41 @@
-# database.py
 """
-Phase 5 (Modified): SQLite Database with Multi-Category Support and Chat Conversations
+Phase 6: PostgreSQL Database with Multi-Category Support and Chat Conversations
 -----------------------------------------------------------------------
-This file creates the 'transcriptions' table (if it doesn't exist) and also creates tables for chat conversations:
-- chat_conversations: Stores conversation metadata (id, name, created_at, updated_at)
-- chat_messages: Stores individual messages (user or assistant) linked to a conversation
-It also provides helper functions for database operations.
+This file now uses PostgreSQL instead of SQLite for better cloud support.
+It maintains the same functionality but with improved scalability.
 """
 
-import sqlite3
 import logging
 from datetime import datetime
+import configparser
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 DB_NAME = "journal.db"
 
 def get_db_connection():
     """
-    Establishes and returns a new database connection.
+    Establishes and returns a new PostgreSQL database connection.
     """
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    return conn
+    config = configparser.ConfigParser()
+    config.read('database_config.ini')
+    
+    try:
+        conn = psycopg2.connect(
+            host=config['PostgreSQL']['host'],
+            database=config['PostgreSQL']['database'],
+            user=config['PostgreSQL']['user'],
+            password=config['PostgreSQL']['password'],
+            port=config['PostgreSQL']['port']
+        )
+        return conn
+    except Exception as e:
+        logging.error(f"Error connecting to PostgreSQL database: {e}")
+        raise
 
 def initialize_db():
     """
-    Creates the necessary tables if they do not exist:
-    - transcriptions
-    - chat_conversations
-    - chat_messages
+    Creates the necessary tables if they do not exist
     """
     try:
         with get_db_connection() as conn:
@@ -35,65 +43,61 @@ def initialize_db():
             # Existing transcriptions table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS transcriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     user_id TEXT NOT NULL,
                     message_id TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
+                    timestamp TIMESTAMP NOT NULL,
                     transcription TEXT NOT NULL,
                     file_path TEXT NOT NULL,
-                    categories TEXT,   -- comma-separated list of categories
+                    categories TEXT,
                     keywords TEXT
                 )
             """)
-            # New table: chat_conversations
+            # Chat conversations table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id SERIAL PRIMARY KEY,
                     name TEXT,
-                    created_at TEXT,
-                    updated_at TEXT
+                    created_at TIMESTAMP,
+                    updated_at TIMESTAMP
                 )
             """)
-            # New table: chat_messages
+            # Chat messages table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS chat_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    conversation_id INTEGER,
-                    role TEXT,  -- 'user' or 'assistant'
+                    id SERIAL PRIMARY KEY,
+                    conversation_id INTEGER REFERENCES chat_conversations(id),
+                    role TEXT,
                     message TEXT,
-                    timestamp TEXT,
-                    FOREIGN KEY(conversation_id) REFERENCES chat_conversations(id)
+                    timestamp TIMESTAMP
                 )
             """)
             conn.commit()
-            logging.info("Database initialized with transcriptions and chat tables.")
+            logging.info("PostgreSQL database initialized with all tables.")
     except Exception as e:
         logging.error(f"Error initializing database: {e}")
+        raise
 
 def insert_transcription_with_ai(user_id: str, message_id: str,
-                                 transcription: str, file_path: str,
-                                 categories: str, keywords: str):
+                               transcription: str, file_path: str,
+                               categories: str, keywords: str):
     """
-    Inserts a new transcription record into 'transcriptions',
-    including multi-categories and keywords.
+    Inserts a new transcription record into 'transcriptions'
     """
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            current_time = datetime.now().isoformat()
+            current_time = datetime.now()
             cursor.execute("""
                 INSERT INTO transcriptions (
                     user_id, message_id, timestamp, transcription, file_path, categories, keywords
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (user_id, message_id, current_time, transcription, file_path, categories, keywords))
             conn.commit()
-            logging.info("Inserted transcription + AI data (multi-category) into DB.")
+            logging.info("Inserted transcription + AI data into PostgreSQL DB.")
     except Exception as e:
         logging.error(f"Error inserting transcription: {e}")
-
-# -------------------------------
-# New functions for chat conversations
-# -------------------------------
+        raise
 
 def create_chat_conversation(name: str) -> int:
     """
@@ -103,13 +107,14 @@ def create_chat_conversation(name: str) -> int:
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            current_time = datetime.now().isoformat()
+            current_time = datetime.now()
             cursor.execute("""
                 INSERT INTO chat_conversations (name, created_at, updated_at)
-                VALUES (?, ?, ?)
+                VALUES (%s, %s, %s)
+                RETURNING id
             """, (name, current_time, current_time))
+            conversation_id = cursor.fetchone()[0]
             conn.commit()
-            conversation_id = cursor.lastrowid
             logging.info(f"Created new chat conversation with ID: {conversation_id}")
             return conversation_id
     except Exception as e:
@@ -118,88 +123,76 @@ def create_chat_conversation(name: str) -> int:
 
 def add_chat_message(conversation_id: int, role: str, message: str):
     """
-    Adds a new message to the chat_messages table for a given conversation.
-    Role should be 'user' or 'assistant'.
+    Adds a new message to the chat_messages table
     """
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            current_time = datetime.now().isoformat()
+            current_time = datetime.now()
             cursor.execute("""
                 INSERT INTO chat_messages (conversation_id, role, message, timestamp)
-                VALUES (?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s)
             """, (conversation_id, role, message, current_time))
-            # Update conversation's updated_at
+            
             cursor.execute("""
                 UPDATE chat_conversations
-                SET updated_at = ?
-                WHERE id = ?
+                SET updated_at = %s
+                WHERE id = %s
             """, (current_time, conversation_id))
             conn.commit()
-            logging.info(f"Added {role} message to conversation {conversation_id}.")
+            logging.info(f"Added {role} message to conversation {conversation_id}")
     except Exception as e:
         logging.error(f"Error adding chat message: {e}")
+        raise
 
 def get_chat_messages(conversation_id: int):
     """
-    Retrieves all messages for a given conversation, ordered by timestamp.
-    Returns a list of dictionaries.
+    Retrieves all messages for a given conversation
     """
     try:
         with get_db_connection() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute("""
                 SELECT role, message, timestamp
                 FROM chat_messages
-                WHERE conversation_id = ?
+                WHERE conversation_id = %s
                 ORDER BY timestamp ASC
             """, (conversation_id,))
-            messages = [dict(row) for row in cursor.fetchall()]
-            return messages
+            return cursor.fetchall()
     except Exception as e:
         logging.error(f"Error retrieving chat messages: {e}")
         return []
 
 def get_all_chat_conversations():
     """
-    Retrieves all chat conversations.
-    Returns a list of dictionaries.
+    Retrieves all chat conversations
     """
     try:
         with get_db_connection() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute("""
                 SELECT id, name, created_at, updated_at
                 FROM chat_conversations
                 ORDER BY updated_at DESC
             """)
-            conversations = [dict(row) for row in cursor.fetchall()]
-            return conversations
+            return cursor.fetchall()
     except Exception as e:
         logging.error(f"Error retrieving chat conversations: {e}")
         return []
 
 def get_chat_conversation(conversation_id: int):
     """
-    Retrieves details of a single chat conversation by ID.
-    Returns a dictionary or None if not found.
+    Retrieves details of a single chat conversation
     """
     try:
         with get_db_connection() as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute("""
                 SELECT id, name, created_at, updated_at
                 FROM chat_conversations
-                WHERE id = ?
+                WHERE id = %s
             """, (conversation_id,))
-            row = cursor.fetchone()
-            if row:
-                return dict(row)
-            else:
-                return None
+            return cursor.fetchone()
     except Exception as e:
         logging.error(f"Error retrieving chat conversation: {e}")
         return None

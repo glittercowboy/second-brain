@@ -3,3 +3,4 @@ openai==0.27.4
 git+https://github.com/openai/whisper.git
 APScheduler==3.6.3
 flask==3.0.2
+psycopg2-binary==2.9.10
