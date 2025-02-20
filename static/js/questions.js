@@ -1,24 +1,22 @@
+// questions.js
+
 document.addEventListener('DOMContentLoaded', function() {
     const chatMessages = document.getElementById('chat-messages');
     const chatInput = document.getElementById('chat-input');
-    const sendButton = document.getElementById('send-button');
-    
-    // Global variable to store current conversation ID
-    window.currentConversationId = null;
 
-    // Set initial height
+    // Load any saved conversation ID from localStorage
+    let currentConversationId = localStorage.getItem('conversationId') || null;
+
+    // Auto-resize the textarea
     chatInput.style.height = '44px';
-
-    // Auto-resize textarea as user types
     chatInput.addEventListener('input', function() {
-        // Temporarily remove height restriction to check content height
         this.style.height = '0';
         const contentHeight = this.scrollHeight;
         const minHeight = 44;
         this.style.height = (contentHeight > minHeight ? contentHeight : minHeight) + 'px';
     });
 
-    // Send message when Enter is pressed (without Shift)
+    // Send message on Enter (without Shift)
     chatInput.addEventListener('keydown', function(e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -26,56 +24,27 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Send message when button is clicked
-    sendButton.addEventListener('click', sendMessage);
-
-    function addMessage(text, isUser = false) {
-        const messageDiv = document.createElement('div');
-        messageDiv.classList.add('message');
-        messageDiv.classList.add(isUser ? 'user-message' : 'ai-message');
-        
-        if (isUser) {
-            messageDiv.textContent = text;
-        } else {
-            const streamSpan = document.createElement('span');
-            streamSpan.classList.add('stream-text');
-            messageDiv.appendChild(streamSpan);
-        }
-        
-        chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-        return messageDiv;
-    }
-
-    async function typeText(element, text, speed = 20) {
-        for (let char of text) {
-            element.textContent += char;
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-            await new Promise(resolve => setTimeout(resolve, speed));
-        }
-    }
-
     async function sendMessage() {
         const message = chatInput.value.trim();
         if (!message) return;
 
-        console.log('Sending message:', message);
-        // Add user message to the chat window
+        // Display user's message
         addMessage(message, true);
         chatInput.value = '';
         chatInput.style.height = '44px';
 
-        // Create container for AI response
-        const aiMessage = addMessage('', false);
-        const streamSpan = aiMessage.querySelector('.stream-text');
+        // Create AI response container
+        const aiMessageDiv = addMessage('', false);
+        const streamSpan = aiMessageDiv.querySelector('.stream-text');
 
         try {
-            console.log('Fetching response from server...');
-            // Build payload and include conversation_id if it exists
-            const payload = { message: message };
-            if (window.currentConversationId) {
-                payload.conversation_id = window.currentConversationId;
+            // Build payload
+            const payload = { message };
+            if (currentConversationId) {
+                payload.conversation_id = currentConversationId;
             }
+
+            // Send to server
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -87,32 +56,50 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(`Server error: ${response.status} - ${errorText}`);
             }
 
-            // Retrieve and store conversation ID from response headers
+            // Get conversation ID from headers, store in localStorage
             const convId = response.headers.get('X-Conversation-Id');
             if (convId) {
-                window.currentConversationId = convId;
-                console.log('Conversation ID:', convId);
+                currentConversationId = convId;
+                localStorage.setItem('conversationId', convId);
             }
 
-            console.log('Starting to read response stream...');
+            // Stream the response
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
 
             while (true) {
                 const { value, done } = await reader.read();
-                if (done) {
-                    console.log('Stream complete');
-                    break;
-                }
-                
+                if (done) break;
                 const text = decoder.decode(value);
-                console.log('Received chunk:', text);
                 await typeText(streamSpan, text);
             }
         } catch (error) {
-            console.error('Error:', error);
             streamSpan.textContent = 'Error: ' + error.message;
             streamSpan.style.color = '#ff0000';
+        }
+    }
+
+    function addMessage(text, isUser) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+        messageDiv.classList.add(isUser ? 'user-message' : 'ai-message');
+        if (isUser) {
+            messageDiv.textContent = text;
+        } else {
+            const streamSpan = document.createElement('span');
+            streamSpan.classList.add('stream-text');
+            messageDiv.appendChild(streamSpan);
+        }
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        return messageDiv;
+    }
+
+    async function typeText(element, text, speed = 20) {
+        for (let char of text) {
+            element.textContent += char;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            await new Promise(resolve => setTimeout(resolve, speed));
         }
     }
 });

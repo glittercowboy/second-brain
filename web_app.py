@@ -1,16 +1,22 @@
 # web_app.py
+
 from flask import Flask, render_template, jsonify, request, Response, stream_with_context
 import sqlite3
 from datetime import datetime, timedelta
 import google.generativeai as genai
 import os
 import configparser
-from collections import defaultdict
-import json  # needed for JSON formatting in prompts
-from database import (get_db_connection, create_chat_conversation, add_chat_message,
-                      get_chat_messages, get_all_chat_conversations, get_chat_conversation,
-                      insert_transcription_with_ai)  # Import new chat functions
-from datetime import datetime
+import json
+import logging
+
+# Import your database helpers
+from database import (
+    initialize_db,
+    get_db_connection,
+    create_chat_conversation,
+    add_chat_message,
+    get_chat_messages
+)
 
 # Load config
 config = configparser.ConfigParser()
@@ -21,28 +27,170 @@ genai.configure(api_key=config['gemini']['GEMINI_API_KEY'])
 
 app = Flask(__name__)
 
-def get_db_connection():
-    conn = sqlite3.connect('journal.db')
-    conn.row_factory = sqlite3.Row
-    return conn
+# Call initialize_db() so that all tables (transcriptions, chat_conversations, chat_messages) exist
+initialize_db()
+
+def is_question(user_input: str) -> bool:
+    """
+    A simple heuristic to detect if the user is asking a question.
+    1. Check if it ends with a question mark.
+    2. Or starts with who/what/when/where/why/how.
+    You can refine this logic as needed.
+    """
+    stripped = user_input.strip().lower()
+    if stripped.endswith('?'):
+        return True
+    question_words = ["who", "what", "when", "where", "why", "how"]
+    return any(stripped.startswith(word + " ") for word in question_words)
+
+def get_all_entries():
+    """
+    Retrieves all journal entries from the database and formats them as a single string.
+    Used for providing context to the AI if the user asks a question.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT timestamp, transcription FROM transcriptions ORDER BY timestamp DESC')
+    entries = cursor.fetchall()
+    conn.close()
+    
+    entries_text = ""
+    for entry in entries:
+        timestamp = entry[0]
+        content = entry[1]
+        entries_text += f"\nDate: {timestamp}\n{content}\n---"
+    return entries_text
+
+def stream_chat_response(message, conversation_id):
+    """
+    Streams the response from Gemini, deciding whether to give a short or detailed answer.
+    - If user_input is recognized as a question, provide more detailed context from the journal.
+    - If it's a statement, respond briefly and store new info.
+    """
+    try:
+        # 1) Retrieve conversation history from DB
+        conversation_history = get_chat_messages(conversation_id)
+        
+        # Build conversation context string
+        conversation_context = ""
+        for msg in conversation_history:
+            role_name = "User" if msg['role'] == 'user' else "Assistant"
+            conversation_context += f"{role_name}: {msg['message']}\n"
+
+        # 2) Decide prompt based on whether it's a question or statement
+        if is_question(message):
+            # Longer, more detailed response with entire journal context
+            journal_entries = get_all_entries()
+            prompt = f"""You are a helpful AI assistant that references the user's journal and chat history.
+
+Here are the journal entries:
+{journal_entries}
+
+Below is the conversation history:
+{conversation_context}
+
+The user's last message is a question:
+User: {message}
+Assistant:"""
+        else:
+            # Shorter response prompt for statements
+            prompt = f"""You are a helpful but concise AI assistant.
+The user is making a statement, not asking a question.
+Respond with a brief acknowledgment or relevant comment, storing any new info about them, but do not provide an overly detailed reply.
+
+Conversation so far:
+{conversation_context}
+User: {message}
+Assistant:"""
+
+        # 3) Set up Gemini model
+        model = genai.GenerativeModel('gemini-1.5-pro')
+
+        # 4) Generate streaming response
+        response = model.generate_content(prompt, stream=True)
+        full_response_text = ""
+
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+                full_response_text += chunk.text
+
+        # 5) After streaming, store the assistant's message in DB
+        add_chat_message(conversation_id, "assistant", full_response_text)
+
+    except Exception as e:
+        logging.error(f"Error in stream_chat_response: {e}")
+        yield f"Error: {str(e)}"
 
 @app.route('/')
 def journal():
     return render_template('journal.html')
 
+@app.route('/patterns')
+def patterns():
+    return render_template('patterns.html')
+
+@app.route('/questions')
+def questions():
+    return render_template('questions.html')
+
+@app.route('/reports')
+def reports():
+    return render_template('reports.html')
+
+# ---------------------------------------------
+# Chat API Endpoint
+# ---------------------------------------------
+@app.route('/api/chat', methods=['POST'])
+def chat():
+    """
+    Endpoint for chat messages.
+    Accepts JSON with 'message' and optionally 'conversation_id'.
+    If no conversation_id is provided, creates a new conversation.
+    Stores the user message, then streams the assistant's response.
+    """
+    try:
+        data = request.get_json()
+        message = data.get('message')
+        conversation_id = data.get('conversation_id')
+
+        if not message:
+            return jsonify({'error': 'No message provided'}), 400
+        
+        # If no conversation ID, create a new conversation
+        if not conversation_id:
+            conversation_name = f"Chat - {message[:20]}..."
+            conversation_id = create_chat_conversation(conversation_name)
+
+        # Store the user's message
+        add_chat_message(conversation_id, "user", message)
+
+        # Stream the assistant's response
+        response = Response(
+            stream_with_context(stream_chat_response(message, conversation_id)),
+            content_type='text/plain'
+        )
+        # Return conversation ID so the front end can continue the same chat
+        response.headers['X-Conversation-Id'] = str(conversation_id)
+        return response
+
+    except Exception as e:
+        logging.error(f"Error in /api/chat: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# ---------------------------------------------
+# Existing API Endpoints for categories, entries, etc.
+# ---------------------------------------------
 @app.route('/api/categories')
 def get_categories():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('SELECT DISTINCT categories FROM transcriptions WHERE categories IS NOT NULL')
-    # Split the comma-separated categories and create a unique set
     categories = set()
     for row in cursor.fetchall():
         if row[0]:
-            # Split by comma, strip whitespace, capitalize first letter, and add to set
             categories.update(cat.strip().capitalize() for cat in row[0].split(','))
     conn.close()
-    # Sort the categories alphabetically
     return jsonify(sorted(list(categories)))
 
 @app.route('/api/entries')
@@ -53,7 +201,6 @@ def get_entries():
     search = request.args.get('search', '').strip()
     
     offset = (page - 1) * per_page
-    
     conn = get_db_connection()
     cursor = conn.cursor()
     
@@ -65,7 +212,6 @@ def get_entries():
     params = []
     
     if category != 'all':
-        # Make the category search case-insensitive
         query += " AND LOWER(categories) LIKE LOWER(?)"
         params.append(f'%{category}%')
     
@@ -82,17 +228,15 @@ def get_entries():
     cursor.execute(query, params)
     entries = []
     for row in cursor.fetchall():
-        categories = row['categories']
+        categories = row[3]
         if categories:
-            # Capitalize each category in the list
             categories = ','.join(cat.strip().capitalize() for cat in categories.split(','))
-        
         entries.append({
-            'id': row['id'],
-            'content': row['content'],
-            'date': row['date'],
+            'id': row[0],
+            'content': row[1],
+            'date': row[2],
             'category': categories,
-            'keywords': row['keywords']
+            'keywords': row[4]
         })
     
     conn.close()
@@ -112,7 +256,6 @@ def update_entry(entry_id):
     )
     conn.commit()
     conn.close()
-    
     return jsonify({'success': True})
 
 @app.route('/api/entries/<int:entry_id>', methods=['DELETE'])
@@ -122,21 +265,11 @@ def delete_entry(entry_id):
     cursor.execute('DELETE FROM transcriptions WHERE id = ?', (entry_id,))
     conn.commit()
     conn.close()
-    
     return jsonify({'success': True})
 
-@app.route('/patterns')
-def patterns():
-    return render_template('patterns.html')
-
-@app.route('/questions')
-def questions():
-    return render_template('questions.html')
-
-@app.route('/reports')
-def reports():
-    return render_template('reports.html')
-
+# ---------------------------------------------
+# Reports / Patterns / Stats Endpoints
+# ---------------------------------------------
 @app.route('/patterns/data')
 def patterns_data():
     conn = get_db_connection()
@@ -145,15 +278,6 @@ def patterns_data():
     patterns = cursor.fetchall()
     conn.close()
     return jsonify(patterns)
-
-@app.route('/questions/data')
-def questions_data():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM questions')
-    questions = cursor.fetchall()
-    conn.close()
-    return jsonify(questions)
 
 @app.route('/reports/data')
 def reports_data():
@@ -164,127 +288,14 @@ def reports_data():
     conn.close()
     return jsonify(reports)
 
-def get_all_entries():
-    """
-    Retrieves all journal entries from the database and formats them as a single string.
-    """
-    print("Getting all entries from database...")
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT timestamp, transcription FROM transcriptions ORDER BY timestamp DESC')
-    entries = cursor.fetchall()
-    conn.close()
-    
-    # Format entries into a nice string
-    entries_text = ""
-    for entry in entries:
-        timestamp = entry[0]
-        content = entry[1]
-        entries_text += f"\nDate: {timestamp}\n{content}\n---"
-    
-    print(f"Retrieved {len(entries)} entries")
-    return entries_text
-
-def stream_chat_response(message, conversation_id):
-    """
-    Streams the response from Gemini using the provided message and conversation history.
-    Builds the prompt with journal entries and chat conversation context.
-    After generating the response, stores the assistant's message in the database.
-    """
-    try:
-        print(f"Processing chat message for conversation {conversation_id}: {message}")
-        
-        # Retrieve previous chat messages for conversation context
-        conversation_history = get_chat_messages(conversation_id)
-        conversation_context = ""
-        for msg in conversation_history:
-            conversation_context += f"{msg['role'].capitalize()}: {msg['message']}\n"
-        # Append the new user message (already stored in DB)
-        conversation_context += f"User: {message}\nAssistant: "
-        
-        # Get journal entries as context
-        journal_entries = get_all_entries()
-        
-        print("Setting up Gemini model for chat with memory...")
-        # Set up the Gemini model
-        model = genai.GenerativeModel('gemini-1.5-pro')
-        
-        # Create the prompt with conversation context and journal entries
-        prompt = f"""You are a helpful AI assistant analyzing someone's personal journal entries and chat conversation history.
-Your task is to provide a thoughtful, empathetic, and personalized response.
-Below are the journal entries and the conversation history:
-
-Journal Entries:
-{journal_entries}
-
-Conversation History:
-{conversation_context}
-"""
-        print("Generating response from Gemini...")
-        # Stream the response and accumulate the full text
-        full_response_text = ""
-        response = model.generate_content(prompt, stream=True)
-        for chunk in response:
-            if chunk.text:
-                print(f"Streaming chunk: {chunk.text[:50]}...")
-                yield chunk.text
-                full_response_text += chunk.text
-        # After streaming, store the assistant's message in the conversation
-        add_chat_message(conversation_id, "assistant", full_response_text)
-    except Exception as e:
-        print(f"Error in stream_chat_response: {str(e)}")
-        yield f"Error: {str(e)}"
-
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    """
-    Endpoint for chat messages.
-    Accepts JSON with 'message' and optionally 'conversation_id'.
-    If no conversation_id is provided, creates a new conversation.
-    Stores the user message and streams the assistant's response.
-    """
-    try:
-        print("Received chat request")
-        data = request.get_json()
-        message = data.get('message')
-        conversation_id = data.get('conversation_id')
-        
-        if not message:
-            print("No message provided")
-            return jsonify({'error': 'No message provided'}), 400
-        
-        # If conversation_id is not provided, create a new conversation with an auto-generated name
-        if not conversation_id:
-            conversation_name = f"Chat - {message[:20]}..."  # Use first 20 characters of message
-            conversation_id = create_chat_conversation(conversation_name)
-            print(f"Created new conversation with ID: {conversation_id}")
-        
-        # Store the user's message in the conversation history
-        add_chat_message(conversation_id, "user", message)
-        
-        # Stream the assistant's response
-        response = Response(
-            stream_with_context(stream_chat_response(message, conversation_id)),
-            content_type='text/plain'
-        )
-        # Add conversation_id to response headers so the client can store it
-        response.headers['X-Conversation-Id'] = str(conversation_id)
-        return response
-    except Exception as e:
-        print(f"Error in chat endpoint: {str(e)}")
-        return jsonify({'error': str(e)}), 500
-
-# (The remaining endpoints such as journal_stats, get_report, generate_report remain unchanged)
 @app.route('/api/journal_stats')
 def journal_stats():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Get date range from query params or use defaults
     start_date = request.args.get('start_date', None)
     end_date = request.args.get('end_date', None)
     
-    # Get first entry date if no start date provided
     if not start_date:
         cursor.execute('SELECT DATE(MIN(timestamp)) FROM transcriptions')
         start_date = cursor.fetchone()[0]
@@ -292,7 +303,6 @@ def journal_stats():
     if not end_date:
         end_date = datetime.now().strftime('%Y-%m-%d')
     
-    # Get entries per day
     cursor.execute('''
         SELECT DATE(timestamp) as date, COUNT(*) as count
         FROM transcriptions
@@ -302,7 +312,6 @@ def journal_stats():
     ''', (start_date, end_date))
     entries_data = cursor.fetchall()
     
-    # Get words per entry
     cursor.execute('''
         SELECT DATE(timestamp) as date, 
                AVG(LENGTH(transcription) - LENGTH(REPLACE(transcription, ' ', '')) + 1) as avg_words
@@ -313,22 +322,21 @@ def journal_stats():
     ''', (start_date, end_date))
     words_data = cursor.fetchall()
     
-    # Get first entry date for client
     cursor.execute('SELECT DATE(MIN(timestamp)) FROM transcriptions')
     first_entry_date = cursor.fetchone()[0]
     
     conn.close()
     
-    # Format data for charts
     dates = []
     entries_per_day = []
     words_per_entry = []
     
+    from datetime import datetime
     current = datetime.strptime(start_date, '%Y-%m-%d')
     end = datetime.strptime(end_date, '%Y-%m-%d')
     
     entries_dict = {row[0]: row[1] for row in entries_data}
-    words_dict = {row[0]: int(row[1]) for row in words_data}
+    words_dict = {row[0]: int(row[1]) for row in words_data if row[1] is not None}
     
     while current.date() <= end.date():
         date_str = current.strftime('%Y-%m-%d')
@@ -347,13 +355,11 @@ def journal_stats():
 @app.route('/api/get_report')
 def get_report():
     try:
-        # Get parameters
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         category = request.args.get('category')
         time_range = request.args.get('time_range')
 
-        # Get cached report from database
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -375,19 +381,17 @@ def get_report():
         return jsonify(None)
 
     except Exception as e:
-        print(f"Error getting report: {str(e)}")
+        logging.error(f"Error getting report: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate_report')
 def generate_report():
     try:
-        # Get parameters
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
         category = request.args.get('category')
         time_range = request.args.get('time_range')
 
-        # Get entries for the date range
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -404,15 +408,17 @@ def generate_report():
                 'generated_at': datetime.now().isoformat()
             })
 
-        # Format entries for analysis
         formatted_entries = []
         for timestamp, text, tags in entries:
-            entry_tags = tags.split(',') if tags else []
-            if category in entry_tags:
+            if tags:
+                tag_list = [t.strip() for t in tags.split(',')]
+            else:
+                tag_list = []
+            if category in tag_list:
                 formatted_entries.append({
                     'date': timestamp,
                     'text': text,
-                    'tags': entry_tags
+                    'tags': tag_list
                 })
 
         if not formatted_entries:
@@ -421,7 +427,6 @@ def generate_report():
                 'generated_at': datetime.now().isoformat()
             })
 
-        # Create prompt for Gemini
         prompt = f'''You are analyzing journal entries for a personal development report. Focus on entries tagged with "{category}" from {start_date} to {end_date}.
 
 Here are the relevant entries:
@@ -450,15 +455,11 @@ Structure the report with these sections:
 - Recommendations
 '''
 
-        # Generate report with Gemini
         model = genai.GenerativeModel('gemini-1.5-pro')
         response = model.generate_content(prompt)
-        
-        # Format the response
         formatted_response = response.text.replace('\n', '<br>')
         generated_at = datetime.now().isoformat()
 
-        # Save report to database
         cursor.execute('''
             INSERT OR REPLACE INTO reports 
             (category, time_range, start_date, end_date, content, generated_at)
@@ -473,7 +474,7 @@ Structure the report with these sections:
         })
 
     except Exception as e:
-        print(f"Error generating report: {str(e)}")
+        logging.error(f"Error generating report: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
