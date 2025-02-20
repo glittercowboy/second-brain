@@ -1,11 +1,16 @@
+# web_app.py
 from flask import Flask, render_template, jsonify, request, Response, stream_with_context
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 import google.generativeai as genai
 import os
 import configparser
 from collections import defaultdict
-from datetime import datetime, timedelta
+import json  # needed for JSON formatting in prompts
+from database import (get_db_connection, create_chat_conversation, add_chat_message,
+                      get_chat_messages, get_all_chat_conversations, get_chat_conversation,
+                      insert_transcription_with_ai)  # Import new chat functions
+from datetime import datetime
 
 # Load config
 config = configparser.ConfigParser()
@@ -160,6 +165,9 @@ def reports_data():
     return jsonify(reports)
 
 def get_all_entries():
+    """
+    Retrieves all journal entries from the database and formats them as a single string.
+    """
     print("Getting all entries from database...")
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -177,63 +185,96 @@ def get_all_entries():
     print(f"Retrieved {len(entries)} entries")
     return entries_text
 
-def stream_chat_response(message):
+def stream_chat_response(message, conversation_id):
+    """
+    Streams the response from Gemini using the provided message and conversation history.
+    Builds the prompt with journal entries and chat conversation context.
+    After generating the response, stores the assistant's message in the database.
+    """
     try:
-        print(f"Processing chat message: {message}")
+        print(f"Processing chat message for conversation {conversation_id}: {message}")
         
-        # Get your journal entries as context
+        # Retrieve previous chat messages for conversation context
+        conversation_history = get_chat_messages(conversation_id)
+        conversation_context = ""
+        for msg in conversation_history:
+            conversation_context += f"{msg['role'].capitalize()}: {msg['message']}\n"
+        # Append the new user message (already stored in DB)
+        conversation_context += f"User: {message}\nAssistant: "
+        
+        # Get journal entries as context
         journal_entries = get_all_entries()
         
-        print("Setting up Gemini model...")
-        # Set up the model
+        print("Setting up Gemini model for chat with memory...")
+        # Set up the Gemini model
         model = genai.GenerativeModel('gemini-1.5-pro')
         
-        # Create the prompt with context
-        prompt = f"""You are a helpful AI assistant analyzing someone's personal journal entries. 
-        Your task is to help them understand patterns, insights, and answer questions about their life based on their journal entries.
-        
-        IMPORTANT: Do not use markdown formatting (no **, __, or other markup) in your responses. Use plain text only.
-        
-        Here are all their journal entries:
-        {journal_entries}
-        
-        Their question is: {message}
-        
-        Please provide a thoughtful, empathetic response based on the actual content of their journal entries.
-        If you can't find relevant information in the entries to answer their question, be honest about it.
-        Remember to use plain text without any markdown formatting."""
-        
+        # Create the prompt with conversation context and journal entries
+        prompt = f"""You are a helpful AI assistant analyzing someone's personal journal entries and chat conversation history.
+Your task is to provide a thoughtful, empathetic, and personalized response.
+Below are the journal entries and the conversation history:
+
+Journal Entries:
+{journal_entries}
+
+Conversation History:
+{conversation_context}
+"""
         print("Generating response from Gemini...")
-        # Stream the response
+        # Stream the response and accumulate the full text
+        full_response_text = ""
         response = model.generate_content(prompt, stream=True)
-        
-        print("Starting to stream response...")
         for chunk in response:
             if chunk.text:
                 print(f"Streaming chunk: {chunk.text[:50]}...")
                 yield chunk.text
+                full_response_text += chunk.text
+        # After streaming, store the assistant's message in the conversation
+        add_chat_message(conversation_id, "assistant", full_response_text)
     except Exception as e:
         print(f"Error in stream_chat_response: {str(e)}")
         yield f"Error: {str(e)}"
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
+    """
+    Endpoint for chat messages.
+    Accepts JSON with 'message' and optionally 'conversation_id'.
+    If no conversation_id is provided, creates a new conversation.
+    Stores the user message and streams the assistant's response.
+    """
     try:
         print("Received chat request")
-        message = request.json.get('message')
+        data = request.get_json()
+        message = data.get('message')
+        conversation_id = data.get('conversation_id')
+        
         if not message:
             print("No message provided")
             return jsonify({'error': 'No message provided'}), 400
-            
-        print(f"Processing message: {message}")
-        return Response(
-            stream_with_context(stream_chat_response(message)),
+        
+        # If conversation_id is not provided, create a new conversation with an auto-generated name
+        if not conversation_id:
+            conversation_name = f"Chat - {message[:20]}..."  # Use first 20 characters of message
+            conversation_id = create_chat_conversation(conversation_name)
+            print(f"Created new conversation with ID: {conversation_id}")
+        
+        # Store the user's message in the conversation history
+        add_chat_message(conversation_id, "user", message)
+        
+        # Stream the assistant's response
+        response = Response(
+            stream_with_context(stream_chat_response(message, conversation_id)),
             content_type='text/plain'
         )
+        # Add conversation_id to response headers so the client can store it
+        response.headers['X-Conversation-Id'] = str(conversation_id)
+        return response
     except Exception as e:
         print(f"Error in chat endpoint: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+# (The remaining endpoints such as journal_stats, get_report, generate_report remain unchanged)
 @app.route('/api/journal_stats')
 def journal_stats():
     conn = get_db_connection()

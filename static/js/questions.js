@@ -2,6 +2,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const chatMessages = document.getElementById('chat-messages');
     const chatInput = document.getElementById('chat-input');
     const sendButton = document.getElementById('send-button');
+    
+    // Global variable to store current conversation ID
+    window.currentConversationId = null;
 
     // Set initial height
     chatInput.style.height = '44px';
@@ -10,17 +13,9 @@ document.addEventListener('DOMContentLoaded', function() {
     chatInput.addEventListener('input', function() {
         // Temporarily remove height restriction to check content height
         this.style.height = '0';
-        
-        // Calculate content height
         const contentHeight = this.scrollHeight;
         const minHeight = 44;
-        
-        // Only grow if content actually needs more than one line
-        if (contentHeight > minHeight) {
-            this.style.height = contentHeight + 'px';
-        } else {
-            this.style.height = minHeight + 'px';
-        }
+        this.style.height = (contentHeight > minHeight ? contentHeight : minHeight) + 'px';
     });
 
     // Send message when Enter is pressed (without Shift)
@@ -65,31 +60,38 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!message) return;
 
         console.log('Sending message:', message);
-
-        // Add user message
+        // Add user message to the chat window
         addMessage(message, true);
-        
-        // Clear input and reset height
         chatInput.value = '';
         chatInput.style.height = '44px';
 
-        // Create message container for AI response
+        // Create container for AI response
         const aiMessage = addMessage('', false);
         const streamSpan = aiMessage.querySelector('.stream-text');
 
         try {
             console.log('Fetching response from server...');
+            // Build payload and include conversation_id if it exists
+            const payload = { message: message };
+            if (window.currentConversationId) {
+                payload.conversation_id = window.currentConversationId;
+            }
             const response = await fetch('/api/chat', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ message: message })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {
                 const errorText = await response.text();
                 throw new Error(`Server error: ${response.status} - ${errorText}`);
+            }
+
+            // Retrieve and store conversation ID from response headers
+            const convId = response.headers.get('X-Conversation-Id');
+            if (convId) {
+                window.currentConversationId = convId;
+                console.log('Conversation ID:', convId);
             }
 
             console.log('Starting to read response stream...');
