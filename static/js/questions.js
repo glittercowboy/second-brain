@@ -52,6 +52,14 @@ document.addEventListener('DOMContentLoaded', function() {
         return messageDiv;
     }
 
+    async function typeText(element, text, speed = 20) {
+        for (let char of text) {
+            element.textContent += char;
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            await new Promise(resolve => setTimeout(resolve, speed));
+        }
+    }
+
     async function sendMessage() {
         const message = chatInput.value.trim();
         if (!message) return;
@@ -97,8 +105,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 const text = decoder.decode(value);
                 console.log('Received chunk:', text);
-                streamSpan.textContent += text;
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                await typeText(streamSpan, text);
             }
         } catch (error) {
             console.error('Error:', error);
